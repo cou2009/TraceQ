@@ -215,7 +215,7 @@ def compare_boq_vs_drawing(boq_items, drawing_merged):
             'Equipment': name,
             'BOQ Qty': int(boq_qty) if boq_qty else '—',
             'Drawing Qty': int(drawing_qty) if drawing_qty else '—',
-            'Difference': f"{diff:+d}" if isinstance(boq_qty, (int, float)) and isinstance(drawing_qty, (int, float)) else '—',
+            'Difference': f"{int(diff):+d}" if isinstance(boq_qty, (int, float)) and isinstance(drawing_qty, (int, float)) else '—',
             'Risk': risk,
             'Exposure (AED)': f"{exposure:,.0f}" if exposure > 0 else '—',
         })
