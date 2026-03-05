@@ -225,12 +225,13 @@ else:
         st.success("All validation checks passed — no warnings.")
     else:
         for w in warnings:
-            if w.startswith('[WARNING]'):
-                st.warning(w)
-            elif w.startswith('[CRITICAL]'):
-                st.error(w)
+            w_str = str(w)
+            if w_str.startswith('[WARNING]'):
+                st.warning(w_str)
+            elif w_str.startswith('[CRITICAL]'):
+                st.error(w_str)
             else:
-                st.info(w)
+                st.info(w_str)
 
     st.markdown("---")
 
