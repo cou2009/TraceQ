@@ -1,0 +1,171 @@
+{
+  "_version": "1.0",
+  "_source": "Nestor NHM layer standards + HVAC layer standards (March 2026)",
+  "_notes": "Fuzzy matching uses keywords array. Exact match checked first, then keyword tokens.",
+
+  "equipment_categories": {
+    "supply_diffuser": {
+      "description": "Supply air diffusers (ceiling/wall mounted)",
+      "exact_layers": ["HVAC-Diff-Supply", "HVAC-SUPPLY AIR OUTLET", "M-S DIFFUSER", "M-SUPPLY AIR DIFUSER"],
+      "keywords": ["SUPPLY", "DIFF", "SAD", "SALD", "DIFUSER"],
+      "exclude_keywords": ["DUCT", "PIPE", "VOLUME"]
+    },
+    "return_diffuser": {
+      "description": "Return air diffusers (ceiling/wall mounted)",
+      "exact_layers": ["HVAC-Diff-Return", "HVAC-RETURN AIR OUTLET", "M-R DIFFUSER"],
+      "keywords": ["RETURN", "DIFF", "RAD", "RALD"],
+      "exclude_keywords": ["DUCT", "PIPE"]
+    },
+    "extract_diffuser": {
+      "description": "Extract/exhaust air diffusers",
+      "exact_layers": ["HVAC-Diff-Extract", "HVAC-EACD"],
+      "keywords": ["EXTRACT", "EXHAUST", "DIFF"],
+      "exclude_keywords": ["DUCT", "EQUIP", "FAN"]
+    },
+    "grille": {
+      "description": "Grilles and registers (general)",
+      "exact_layers": ["M-DIFGRL"],
+      "keywords": ["GRILLE", "GRILL", "REGISTER", "GRL"],
+      "exclude_keywords": []
+    },
+    "volume_control_damper": {
+      "description": "Volume control dampers (circular and rectangular)",
+      "exact_layers": ["HVAC-VCD"],
+      "keywords": ["VCD", "VOLUME", "DAMPER", "SVD"],
+      "exclude_keywords": ["FIRE", "MOTOR", "NON-RETURN", "SOUND"]
+    },
+    "fire_damper": {
+      "description": "Fire dampers (at fire-rated wall/slab penetrations)",
+      "exact_layers": ["HVAC-FD"],
+      "keywords": ["FIRE", "FD", "LFD", "DFD"],
+      "exclude_keywords": ["ALARM", "FIGHTING", "HOSE", "EXTINGUISHER", "SPRINKLER"]
+    },
+    "motorized_damper": {
+      "description": "Motorized dampers (automation/control)",
+      "exact_layers": [],
+      "keywords": ["MOTORIZ", "MOTOR", "DAMPER", "ACTUATOR"],
+      "exclude_keywords": ["FIRE", "VOLUME", "NON-RETURN"]
+    },
+    "non_return_damper": {
+      "description": "Non-return / backdraft dampers",
+      "exact_layers": [],
+      "keywords": ["NON-RETURN", "BACKDRAFT", "NRD", "CHECK"],
+      "exclude_keywords": ["FIRE", "VOLUME"]
+    },
+    "sound_attenuator": {
+      "description": "Sound attenuators / silencers",
+      "exact_layers": ["HVAC-Sound-Attenuater"],
+      "keywords": ["SOUND", "ATTENUATOR", "SILENCER", "ACOUSTIC"],
+      "exclude_keywords": ["LINING", "INSULATION"]
+    },
+    "thermostat": {
+      "description": "Wall-mounted thermostats (qty should equal FCU count)",
+      "exact_layers": ["HVAC-THERMOSTAT", "HVAC T STAT"],
+      "keywords": ["THERMOSTAT", "T STAT", "TSTAT", "THERMO"],
+      "exclude_keywords": []
+    },
+    "fcu": {
+      "description": "Fan coil units (ducted + wall-mounted)",
+      "exact_layers": ["HVAC-FCU", "M-FCU", "AC-FAN COIL"],
+      "keywords": ["FCU", "FAN COIL", "FANCOIL"],
+      "exclude_keywords": []
+    },
+    "indoor_unit": {
+      "description": "AC indoor units (VRV/VRF/DX split indoor)",
+      "exact_layers": ["HVAC-IDU"],
+      "keywords": ["IDU", "INDOOR", "SPLIT"],
+      "exclude_keywords": ["OUTDOOR", "ODU"]
+    },
+    "outdoor_unit": {
+      "description": "AC outdoor/condensing units (VRV/VRF/DX split outdoor)",
+      "exact_layers": ["HVAC-ODU", "ODU"],
+      "keywords": ["ODU", "OUTDOOR", "CONDENSING", "CONDENSER", "VRV", "VRF"],
+      "exclude_keywords": ["INDOOR", "IDU"]
+    },
+    "air_handling_unit": {
+      "description": "AHU / FAHU units",
+      "exact_layers": ["M-AHU"],
+      "keywords": ["AHU", "FAHU", "AIR HANDLING"],
+      "exclude_keywords": []
+    },
+    "access_door": {
+      "description": "Access doors/panels for maintenance",
+      "exact_layers": ["HVAC-ACCESS DOOR", "HVAC- Access-Door", "HVAC-AP-AD"],
+      "keywords": ["ACCESS", "DOOR", "PANEL", "AP-AD"],
+      "exclude_keywords": ["FIRE"]
+    },
+    "exhaust_fan": {
+      "description": "Exhaust / ventilation fans (inline, roof, wall)",
+      "exact_layers": ["HVAC-EXHAUST EQUIPMENT"],
+      "keywords": ["EXHAUST", "FAN", "EAF", "VENTILAT"],
+      "exclude_keywords": ["DIFFUSER", "DUCT"]
+    },
+    "air_curtain": {
+      "description": "Air curtains at entrances",
+      "exact_layers": [],
+      "keywords": ["AIR CURTAIN", "CURTAIN"],
+      "exclude_keywords": []
+    },
+    "damper_general": {
+      "description": "General damper (type unclassified)",
+      "exact_layers": ["M-DMPR"],
+      "keywords": ["DAMPER", "DMPR"],
+      "exclude_keywords": []
+    },
+    "hvac_equipment": {
+      "description": "General HVAC equipment (unclassified)",
+      "exact_layers": ["HVAC-EQUIPMENT", "HVAC-DUCT EQUIPMENT", "M-EQUP", "M-AC"],
+      "keywords": ["EQUIP", "HVAC", "MECH"],
+      "exclude_keywords": ["TEXT", "DIM", "ARROW", "INSULATION"]
+    },
+    "supply_duct": {
+      "description": "Supply air ductwork",
+      "exact_layers": ["HVAC-SUPPLY", "HVAC-SA", "M-SADUCT"],
+      "keywords": ["SUPPLY", "DUCT", "SA"],
+      "exclude_keywords": ["DIFFUSER", "OUTLET", "AIR OUTLET", "DAMPER", "VOLUME"]
+    },
+    "return_duct": {
+      "description": "Return air ductwork",
+      "exact_layers": ["HVAC-RETURN", "M-RADUCT"],
+      "keywords": ["RETURN", "DUCT", "RA"],
+      "exclude_keywords": ["DIFFUSER", "OUTLET", "AIR OUTLET", "DAMPER"]
+    },
+    "exhaust_duct": {
+      "description": "Exhaust / extract air ductwork",
+      "exact_layers": ["HVAC-EXTRACT", "M-EADUCT", "M-EX-DUCT"],
+      "keywords": ["EXTRACT", "EXHAUST", "EA", "DUCT"],
+      "exclude_keywords": ["DIFFUSER", "FAN", "EQUIPMENT"]
+    },
+    "fresh_air_duct": {
+      "description": "Fresh air ductwork",
+      "exact_layers": ["HVAC-FRESH-AIR", "M-FA-DUCT"],
+      "keywords": ["FRESH", "AIR", "DUCT", "OUTSIDE"],
+      "exclude_keywords": ["DIFFUSER", "LOUVER"]
+    },
+    "refrigerant_pipe": {
+      "description": "Refrigerant piping",
+      "exact_layers": ["HVAC-REFRIGERANT PIPE", "AC REF PIPE"],
+      "keywords": ["REFRIGERANT", "REF PIPE", "COPPER"],
+      "exclude_keywords": []
+    },
+    "drain_pipe": {
+      "description": "AC condensate drain piping",
+      "exact_layers": ["AC DRAIN PIPE", "M-DR-ACDP"],
+      "keywords": ["DRAIN", "CONDENSATE", "ACDP"],
+      "exclude_keywords": ["SEWER", "STORM", "RAIN"]
+    },
+    "insulation": {
+      "description": "Duct/pipe insulation",
+      "exact_layers": ["HVAC-INSULATION"],
+      "keywords": ["INSULATION", "INSUL"],
+      "exclude_keywords": []
+    }
+  },
+
+  "ignore_layers": {
+    "description": "Layers that should never be classified as equipment",
+    "patterns": ["TEXT", "DIM", "ANNOTATION", "ARROW", "XREF", "DEFPOINTS", "BORDER",
+                 "GRID", "AXIS", "FRAME", "LEGEND", "TITLE", "NOTES", "LEADER",
+                 "HATCH", "SECTION", "DETAIL", "SCHEDULE", "SCHEMATIC"]
+  }
+}

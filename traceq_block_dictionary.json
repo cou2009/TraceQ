@@ -1,0 +1,235 @@
+{
+  "_version": "1.0",
+  "_source": "Consolidated from Samples 3, 4, 5, 6 + Nestor feedback (March 2026)",
+  "_notes": "Block names are case-sensitive in DXF. confidence_note explains special handling.",
+
+  "blocks": {
+    "*U19": {
+      "equipment_type": "supply_diffuser",
+      "description": "Supply air diffuser (4-way ceiling)",
+      "confidence": 0.7,
+      "confidence_note": "Overcounts vs BOQ. Use MTEXT 'SAD' label count instead when available.",
+      "samples_seen": ["S5", "S6"],
+      "nestor_confirmed": true
+    },
+    "*U16": {
+      "equipment_type": "return_diffuser",
+      "description": "Return air diffuser (4-way ceiling)",
+      "confidence": 0.95,
+      "confidence_note": "Perfect match to BOQ in S5/S6.",
+      "samples_seen": ["S5", "S6"],
+      "nestor_confirmed": true
+    },
+    "*U17": {
+      "equipment_type": "return_diffuser",
+      "description": "Extract diffuser — but Nestor confirmed: under AC system, treat as Return Air Diffuser (RAD)",
+      "confidence": 0.9,
+      "confidence_note": "Same count as *U16. Per Nestor: 'If extract air diffuser is labeled under AC system, it shall be considered as a Return Air Diffuser (RAD).'",
+      "samples_seen": ["S5", "S6"],
+      "nestor_confirmed": true
+    },
+    "VCD 200": {
+      "equipment_type": "volume_control_damper",
+      "sub_type": "circular",
+      "size": "200mm dia",
+      "description": "Circular VCD at flexible duct branch from main duct, serving supply air diffuser",
+      "confidence": 0.95,
+      "confidence_note": "Maps to 'Supply Volume Damper (SVD)' in BOQ per Nestor.",
+      "samples_seen": ["S5", "S6"],
+      "nestor_confirmed": true
+    },
+    "*U20": {
+      "equipment_type": "volume_control_damper",
+      "sub_type": "circular",
+      "size": "200mm dia",
+      "description": "Alternate block for VCD 200 — exact same count. Two VCD types exist: circular (by diameter) and rectangular (by duct size).",
+      "confidence": 0.85,
+      "confidence_note": "Duplicate count with VCD 200 — do NOT double-count. Use VCD 200 as primary.",
+      "samples_seen": ["S5", "S6"],
+      "nestor_confirmed": true
+    },
+    "*U5": {
+      "equipment_type": "thermostat",
+      "description": "Wall-mounted thermostat. Quantity should equal total FCU count (wall-mounted + ducted).",
+      "confidence": 0.6,
+      "confidence_note": "Undercounts ~20% in S5 (136 vs 170 BOQ). Layer-based count is more reliable.",
+      "samples_seen": ["S5", "S6"],
+      "nestor_confirmed": true
+    },
+    "ARGD 18": {
+      "equipment_type": "grille",
+      "description": "Ceiling grille — another type of air terminal for air distribution.",
+      "confidence": 0.85,
+      "confidence_note": "Per Nestor: not utilized in S5/S6 shared sample, therefore excluded from quantity take-off.",
+      "samples_seen": ["S5", "S6"],
+      "nestor_confirmed": true
+    },
+    "AC SPLIT": {
+      "equipment_type": "indoor_unit",
+      "sub_type": "split",
+      "description": "Split AC indoor unit. Not utilized in S5/S6 samples.",
+      "confidence": 0.85,
+      "confidence_note": "Per Nestor: not utilized in the shared sample layout.",
+      "samples_seen": ["S5", "S6"],
+      "nestor_confirmed": true
+    },
+    "A$C19F659CD": {
+      "equipment_type": "indoor_unit",
+      "description": "Auto-generated block name — corresponds to AC indoor units. Count excludes legend unit to match BOQ.",
+      "confidence": 0.8,
+      "confidence_note": "Per Nestor: 'This refers specifically to the AC equipment.' Excludes unit indicated in legend.",
+      "samples_seen": ["S5", "S6"],
+      "nestor_confirmed": true
+    },
+    "LFD": {
+      "equipment_type": "fire_damper",
+      "description": "Fire damper block (Project 3 Villa). 146 found on drawings, ZERO in BOQ.",
+      "confidence": 0.95,
+      "confidence_note": "Nestor confirmed: 'any item shown in the layout should be properly quantified and priced.'",
+      "samples_seen": ["P3"],
+      "nestor_confirmed": true
+    },
+    "vcd": {
+      "equipment_type": "volume_control_damper",
+      "description": "VCD block (lowercase, Project 3). Different naming convention from S5/S6.",
+      "confidence": 0.9,
+      "confidence_note": "Project 3 used lowercase block names.",
+      "samples_seen": ["P3"],
+      "nestor_confirmed": false
+    },
+    "DFD": {
+      "equipment_type": "fire_damper",
+      "description": "Fire damper (duct fire damper) block — Project 4. 140 generic + 13 sized (FD-300, FD-250, FD-400).",
+      "confidence": 0.9,
+      "confidence_note": "Nestor confirmed findings are plausible real-world errors.",
+      "samples_seen": ["P4"],
+      "nestor_confirmed": true
+    }
+  },
+
+  "block_prefix_rules": {
+    "A$C": {
+      "description": "Auto-generated blocks. Most are NOT equipment — only A$C19F659CD confirmed as indoor units.",
+      "default_type": null,
+      "confidence_note": "Per Nestor: other A$C prefix blocks are 'Not an equipment.'"
+    },
+    "*U": {
+      "description": "Unnamed/anonymous blocks. Many are equipment. Must check against specific known *U blocks.",
+      "default_type": null,
+      "confidence_note": "Each *U block must be individually identified."
+    },
+    "FD-": {
+      "description": "Fire damper with size suffix (e.g., FD-300, FD-250, FD-400).",
+      "default_type": "fire_damper",
+      "confidence": 0.9
+    },
+    "VCD": {
+      "description": "Volume control damper variants.",
+      "default_type": "volume_control_damper",
+      "confidence": 0.85
+    },
+    "FCU-": {
+      "description": "Fan coil unit with zone/number suffix.",
+      "default_type": "fcu",
+      "confidence": 0.9
+    },
+    "VRV-": {
+      "description": "VRV/VRF unit identifier.",
+      "default_type": "outdoor_unit",
+      "confidence": 0.8
+    },
+    "VRF-": {
+      "description": "VRF unit identifier.",
+      "default_type": "outdoor_unit",
+      "confidence": 0.8
+    },
+    "EAF-": {
+      "description": "Exhaust air fan.",
+      "default_type": "exhaust_fan",
+      "confidence": 0.9
+    },
+    "DAC-": {
+      "description": "Door air curtain.",
+      "default_type": "air_curtain",
+      "confidence": 0.9
+    }
+  },
+
+  "mtext_patterns": {
+    "supply_diffuser": {
+      "patterns": ["\\bSAD\\b", "\\bS\\.?A\\.?D\\b", "SUPPLY AIR DIFF"],
+      "count_method": "count_occurrences",
+      "confidence": 0.6,
+      "notes": "SAD = Supply Air Diffuser. Count occurrences (not unique labels — SAD is same text repeated). Nestor confirmed this is the reliable count method for *U19."
+    },
+    "return_diffuser": {
+      "patterns": ["\\bRAD\\b", "\\bR\\.?A\\.?D\\b", "RETURN AIR DIFF"],
+      "count_method": "count_occurrences",
+      "confidence": 0.6
+    },
+    "fcu": {
+      "patterns": ["FCU-\\d+", "FCU-[A-Z]+-\\d+"],
+      "count_method": "count_occurrences",
+      "confidence": 0.6,
+      "notes": "Count occurrences of FCU labels. In S5: FCU-01 (88x), FCU-02 (40x), FCU-03 (24x), FCU-4 (4x) = 156 total. BOQ target 170."
+    },
+    "vrf": {
+      "patterns": ["VRF-[A-Z0-9]+-[A-Z0-9]+", "VRV-[A-Z0-9]+-[A-Z0-9]+", "VRV-\\d+"],
+      "count_method": "count_unique_labels",
+      "confidence": 0.6
+    },
+    "flow_bar": {
+      "patterns": ["FLOW BAR", "S/R FLOW BAR", "FLOW BAR.*RECESSED"],
+      "count_method": "count_occurrences",
+      "confidence": 0.5,
+      "notes": "Per Nestor: can be polylines, blocks, or annotations. No reliable block-based count."
+    },
+    "plenum_box": {
+      "patterns": ["PLENUM BOX", "PLENUM\\s+BOX.*SIZE"],
+      "count_method": "count_occurrences",
+      "confidence": 0.4,
+      "notes": "Per Nestor: can be polylines, blocks, or annotations."
+    },
+    "flexible_duct": {
+      "patterns": ["FLEXIBLE DUCT", "FLEX.*DUCT", "FLEX.*\\d+\\s*DIA"],
+      "count_method": "special_flex_duct",
+      "confidence": 0.4,
+      "notes": "Per Nestor: quantified as max 1m per air terminal, with diameters 150/200/250/300mm."
+    }
+  },
+
+  "vcd_types": {
+    "_nestor_note": "Two types of VCD: circular and rectangular. Both vary in size.",
+    "circular": {
+      "description": "Quantified by diameter (150mm, 200mm, 250mm, 300mm)",
+      "location": "Connection point where flexible duct branches from main duct, serving supply air diffuser",
+      "block_names": ["VCD 200", "*U20"],
+      "sizing": "Based on airflow requirements and duct configuration"
+    },
+    "rectangular": {
+      "description": "Size corresponds to AC duct size",
+      "location": "Sub-branches of the main duct",
+      "block_names": [],
+      "sizing": "Matches duct cross-section dimensions (e.g., 250x250mm)"
+    }
+  },
+
+  "validation_rules": {
+    "thermostat_equals_fcu": {
+      "description": "Thermostat count should equal total FCU count (wall-mounted + ducted)",
+      "source": "Nestor confirmed: 'quantity of thermostats shall correspond to the total quantity of FCUs for both types'",
+      "severity": "warning",
+      "tolerance_percent": 10
+    },
+    "fire_dampers_at_penetrations": {
+      "description": "Fire dampers should exist where ducts penetrate fire-rated walls/slabs",
+      "source": "Nestor: 'typically included in HVAC drawings where duct passes through fire-rated wall'",
+      "severity": "info"
+    },
+    "standard_practice_items": {
+      "description": "Items that should be in BOQ even if not on drawings",
+      "items": ["duct_supports", "acoustic_lining", "duct_insulation", "vcds", "air_terminals", "sound_attenuators"],
+      "source": "Nestor: 'for accurate takeoff, it is important to include these items'"
+    }
+  }
+}
