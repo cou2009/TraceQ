@@ -23,6 +23,13 @@ from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 
+# Try to import ezdxf (proper DXF library) — fall back to pure Python parser
+try:
+    import ezdxf
+    HAS_EZDXF = True
+except ImportError:
+    HAS_EZDXF = False
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION LOADER
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -347,6 +354,135 @@ class DXFParser:
         text = re.sub(r'\{|\}', '', text)              # Braces
         text = re.sub(r'\\[A-Za-z][^;]*;', '', text)  # Remaining codes
         return text.strip()
+
+    @property
+    def total_entities(self):
+        return self._total_entities
+
+    @property
+    def entity_counts_by_layer(self):
+        counts = Counter()
+        for e in self.all_entities:
+            counts[e['layer']] += 1
+        return dict(counts)
+
+    @property
+    def insert_counts_by_block(self):
+        counts = Counter()
+        for ins in self.inserts:
+            counts[ins['name']] += 1
+        return dict(counts)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# EZDXF PARSER (Uses ezdxf library when available — better DXF + DWG support)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class EzdxfParser:
+    """
+    Full-featured DXF parser using the ezdxf library.
+    Same interface as DXFParser so the rest of the engine works unchanged.
+    Handles DXF files and can work with DWG files converted via libredwg.
+    """
+
+    def __init__(self, filepath):
+        self.filepath = filepath
+        self.layers = {}
+        self.inserts = []
+        self.mtext_entities = []
+        self.text_entities = []
+        self.all_entities = []
+        self.block_definitions = {}
+        self._total_entities = 0
+
+    def parse(self):
+        """Parse using ezdxf library."""
+        doc = ezdxf.readfile(self.filepath)
+        msp = doc.modelspace()
+
+        # Extract layers
+        for layer in doc.layers:
+            self.layers[layer.dxf.name] = {
+                'name': layer.dxf.name,
+                'color': layer.dxf.color if hasattr(layer.dxf, 'color') else 7,
+                'entity_count': 0,
+            }
+
+        # Extract entities from modelspace
+        for entity in msp:
+            self._total_entities += 1
+            etype = entity.dxftype()
+            layer = entity.dxf.layer if hasattr(entity.dxf, 'layer') else '0'
+
+            self.all_entities.append({'type': etype, 'layer': layer})
+
+            # Track entity count per layer
+            if layer in self.layers:
+                self.layers[layer]['entity_count'] += 1
+
+            if etype == 'INSERT':
+                block_name = entity.dxf.name if hasattr(entity.dxf, 'name') else ''
+                if block_name:
+                    x = entity.dxf.insert.x if hasattr(entity.dxf, 'insert') else 0
+                    y = entity.dxf.insert.y if hasattr(entity.dxf, 'insert') else 0
+                    self.inserts.append({
+                        'name': block_name,
+                        'layer': layer,
+                        'x': x,
+                        'y': y,
+                    })
+
+            elif etype == 'MTEXT':
+                try:
+                    raw = entity.text if hasattr(entity, 'text') else ''
+                    # ezdxf can give us plain text directly
+                    try:
+                        clean = entity.plain_text() if hasattr(entity, 'plain_text') else raw
+                    except Exception:
+                        clean = DXFParser._clean_mtext(raw)
+                    if clean:
+                        x = entity.dxf.insert.x if hasattr(entity.dxf, 'insert') else 0
+                        y = entity.dxf.insert.y if hasattr(entity.dxf, 'insert') else 0
+                        self.mtext_entities.append({
+                            'text': clean,
+                            'raw_text': raw,
+                            'layer': layer,
+                            'x': x,
+                            'y': y,
+                        })
+                except Exception:
+                    pass
+
+            elif etype == 'TEXT':
+                try:
+                    text = entity.dxf.text if hasattr(entity.dxf, 'text') else ''
+                    if text:
+                        x = entity.dxf.insert.x if hasattr(entity.dxf, 'insert') else 0
+                        y = entity.dxf.insert.y if hasattr(entity.dxf, 'insert') else 0
+                        self.text_entities.append({
+                            'text': text,
+                            'layer': layer,
+                            'x': x,
+                            'y': y,
+                        })
+                except Exception:
+                    pass
+
+        # Extract block definitions
+        for block in doc.blocks:
+            name = block.name
+            entities = 0
+            block_layers = set()
+            for e in block:
+                entities += 1
+                if hasattr(e.dxf, 'layer'):
+                    block_layers.add(e.dxf.layer)
+            self.block_definitions[name] = {
+                'entity_count': entities,
+                'layers_used': list(block_layers),
+            }
+
+        return self
 
     @property
     def total_entities(self):
@@ -841,6 +977,39 @@ class AnalysisResult:
     def merged(self):
         return self.detection.get('merged', {})
 
+    @property
+    def detection_results(self):
+        return self.detection
+
+    @property
+    def validation_results(self):
+        return {
+            'is_valid': self.validation[0],
+            'violations': self.validation[1],
+            'warnings': self.validation[2],
+        }
+
+    @property
+    def parse_info(self):
+        return {
+            'total_entities': self.parser.total_entities,
+            'layers': len(self.parser.layers),
+            'block_types': len(self.parser.insert_counts_by_block),
+            'inserts': len(self.parser.inserts),
+            'mtext': len(self.parser.mtext_entities),
+        }
+
+    @property
+    def layer_classification(self):
+        """Get layer classification from the engine's classifier."""
+        config = Config()
+        classifier = LayerClassifier(config)
+        return classifier.classify_all_layers(self.parser.layers.keys())
+
+    def to_dict(self):
+        """Export results as a dictionary."""
+        return self.to_json()
+
     def summary(self):
         """Generate human-readable summary string."""
         lines = []
@@ -1033,7 +1202,7 @@ class TraceQEngine:
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"File not found: {filepath}")
 
-        # Step 1: Handle file type
+        # Step 1: Handle file type — convert DWG to DXF if needed
         file_type = FileConverter.detect_type(filepath)
         if file_type == 'dwg':
             print(f"[TraceQ] DWG file detected. Converting to DXF...")
@@ -1044,9 +1213,14 @@ class TraceQEngine:
         else:
             raise ValueError(f"Unsupported file type: {file_type}")
 
-        # Step 2: Parse DXF
+        # Step 2: Parse DXF — use ezdxf if available, otherwise pure Python
         print(f"[TraceQ] Parsing entities...")
-        parser = DXFParser(filepath)
+        if HAS_EZDXF:
+            print(f"[TraceQ] Using ezdxf library (full feature parser)")
+            parser = EzdxfParser(filepath)
+        else:
+            print(f"[TraceQ] Using pure Python parser (ezdxf not available)")
+            parser = DXFParser(filepath)
         parser.parse()
         print(f"[TraceQ] Parsed: {parser.total_entities:,} entities, "
               f"{len(parser.layers)} layers, "

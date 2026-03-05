@@ -63,9 +63,9 @@ with st.sidebar:
     st.markdown("Upload your HVAC drawing to analyse.")
 
     drawing_file = st.file_uploader(
-        "📐 Drawing File (DXF)",
-        type=["dxf"],
-        help="Upload the HVAC layout drawing in DXF format."
+        "📐 Drawing File (DXF or DWG)",
+        type=["dxf", "dwg"],
+        help="Upload the HVAC layout drawing in DXF or DWG format."
     )
 
     boq_file = st.file_uploader(
@@ -100,7 +100,7 @@ if drawing_file is None:
     col1, col2, col3 = st.columns(3)
     with col1:
         st.markdown("#### 📐 Upload a Drawing")
-        st.markdown("Upload your HVAC layout drawing (DXF format) using the sidebar.")
+        st.markdown("Upload your HVAC layout drawing (DXF or DWG) using the sidebar.")
     with col2:
         st.markdown("#### 🔍 Automatic Analysis")
         st.markdown("TraceQ scans every layer, block, and text label to count equipment.")
@@ -109,13 +109,15 @@ if drawing_file is None:
         st.markdown("See discrepancies, missing items, and cost exposure at a glance.")
 
     st.markdown("---")
-    st.info("👈 Upload a DXF file in the sidebar to get started.")
+    st.info("👈 Upload a DXF or DWG file in the sidebar to get started.")
 
 else:
     # ─── Run Analysis ─────────────────────────────────────────────────────────
     with st.spinner("Analysing drawing... this may take a moment."):
         # Save uploaded file to temp location
-        with tempfile.NamedTemporaryFile(suffix=".dxf", delete=False) as tmp:
+        # Detect file type from uploaded filename
+        file_ext = os.path.splitext(drawing_file.name)[1].lower() or '.dxf'
+        with tempfile.NamedTemporaryFile(suffix=file_ext, delete=False) as tmp:
             tmp.write(drawing_file.read())
             tmp_path = tmp.name
 
