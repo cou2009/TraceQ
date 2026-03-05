@@ -10,11 +10,217 @@ Built by TechTelligence | nicholas@ttelligence.com
 import streamlit as st
 import json
 import os
+import re
 import tempfile
 from datetime import datetime
 
+import openpyxl
+
 # Import the TraceQ engine (same directory)
 from traceq_engine import TraceQEngine, Config
+
+
+# ─── BOQ Parser ───────────────────────────────────────────────────────────────
+
+# Mapping: keywords in BOQ descriptions → engine equipment types
+BOQ_KEYWORD_MAP = [
+    # Order matters — more specific matches first
+    ('FCU-1', 'fcu', 'FCU-1 Ducted'),
+    ('FCU-2', 'fcu', 'FCU-2 Ducted'),
+    ('FCU-3', 'fcu', 'FCU-3 Ducted'),
+    ('FCU-4', 'fcu', 'FCU-4'),
+    ('FCU', 'fcu', 'FCU (General)'),
+    ('FAN COIL', 'fcu', 'Fan Coil Unit'),
+    ('THERMOSTAT', 'thermostat', 'Thermostat'),
+    ('SUPPLY AIR DIFFUSER', 'supply_diffuser', 'Supply Air Diffuser'),
+    ('RETURN AIR DIFFUSER', 'return_diffuser', 'Return Air Diffuser'),
+    ('SUPPLY AIR FLOW BAR', 'flow_bar', 'Supply Air Flow Bar'),
+    ('RETURN AIR FLOW BAR', 'flow_bar', 'Return Air Flow Bar'),
+    ('FLOW BAR', 'flow_bar', 'Flow Bar'),
+    ('PLENUM BOX', 'plenum_box', 'Plenum Box'),
+    ('VOLUME DAMPER', 'volume_control_damper', 'Volume Control Damper'),
+    ('VCD', 'volume_control_damper', 'VCD'),
+    ('FIRE DAMPER', 'fire_damper', 'Fire Damper'),
+    ('MOTORIZED DAMPER', 'motorized_damper', 'Motorized Damper'),
+    ('NON RETURN DAMPER', 'non_return_damper', 'Non-Return Damper'),
+    ('SOUND ATTENUATOR', 'sound_attenuator', 'Sound Attenuator'),
+    ('SUPPLY AIR DUCT', 'supply_duct', 'Supply Air Duct'),
+    ('RETURN AIR DUCT', 'return_duct', 'Return Air Duct'),
+    ('FLEXIBLE DUCT', 'flexible_duct', 'Flexible Duct'),
+    ('VRV', 'vrf', 'VRV/VRF Unit'),
+    ('VRF', 'vrf', 'VRF Unit'),
+    ('OUTDOOR UNIT', 'outdoor_unit', 'Outdoor Unit'),
+    ('INDOOR UNIT', 'indoor_unit', 'Indoor Unit'),
+    ('WALL MOUNTED', 'indoor_unit', 'Wall Mounted Unit'),
+    ('GRILLE', 'grille', 'Grille'),
+    ('EXHAUST FAN', 'exhaust_fan', 'Exhaust Fan'),
+    ('VENTILATION FAN', 'exhaust_fan', 'Ventilation Fan'),
+    ('ACCESS DOOR', 'access_door', 'Access Door'),
+    ('DRAIN', 'drain_pipe', 'Drain Pipe'),
+    ('INSULATION', 'insulation', 'Insulation'),
+]
+
+
+def parse_boq(file_bytes, filename):
+    """
+    Parse a BOQ Excel file and extract equipment items.
+    Returns list of dicts: [{description, equipment_type, qty, unit, rate, total}]
+    """
+    # Save to temp file for openpyxl
+    suffix = os.path.splitext(filename)[1].lower() or '.xlsx'
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(file_bytes)
+        tmp_path = tmp.name
+
+    try:
+        wb = openpyxl.load_workbook(tmp_path, data_only=True)
+        ws = wb.active
+
+        items = []
+        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, values_only=True):
+            # Find rows that have a description and a numeric quantity
+            # BOQ format: col B = item#/desc, col C = desc, col D = unit, col E = qty, col F = rate, col G = total
+            # But format varies — scan all columns for description + qty
+            desc = None
+            qty = None
+            unit = None
+            rate = None
+            total = None
+
+            for i, val in enumerate(row):
+                if val is None:
+                    continue
+                s = str(val).strip()
+                if not s:
+                    continue
+
+                # Look for quantity (numeric, reasonable range)
+                if qty is None and isinstance(val, (int, float)) and 0 < val < 100000:
+                    # Check if this is likely a qty (not a rate or item number)
+                    # Heuristic: if we already found a description, this could be qty
+                    if desc and i > 1:
+                        qty = val
+                        # Try to get unit, rate, total from subsequent columns
+                        remaining = row[i+1:] if i+1 < len(row) else []
+                        for j, rv in enumerate(remaining):
+                            if rv is None:
+                                continue
+                            if isinstance(rv, str) and rv.strip():
+                                if unit is None:
+                                    unit = rv.strip()
+                            if isinstance(rv, (int, float)):
+                                if rate is None:
+                                    rate = rv
+                                elif total is None:
+                                    total = rv
+                        break
+
+                # Look for description (string with equipment keywords)
+                if desc is None and isinstance(val, str) and len(s) > 3:
+                    upper = s.upper()
+                    # Check if this looks like an equipment description
+                    for keyword, _, _ in BOQ_KEYWORD_MAP:
+                        if keyword in upper:
+                            desc = s
+                            break
+
+            if desc and qty and qty > 0:
+                # Classify the description
+                equip_type = None
+                equip_label = desc
+                upper_desc = desc.upper()
+                for keyword, etype, label in BOQ_KEYWORD_MAP:
+                    if keyword in upper_desc:
+                        equip_type = etype
+                        equip_label = label
+                        break
+
+                items.append({
+                    'description': desc,
+                    'equipment_type': equip_type,
+                    'equipment_label': equip_label,
+                    'qty': qty,
+                    'unit': unit,
+                    'rate': rate,
+                    'total': total,
+                })
+
+        os.unlink(tmp_path)
+        return items
+
+    except Exception as e:
+        os.unlink(tmp_path)
+        raise e
+
+
+def compare_boq_vs_drawing(boq_items, drawing_merged):
+    """
+    Compare BOQ items against drawing detection results.
+    Returns list of comparison rows.
+    """
+    comparisons = []
+
+    # Aggregate BOQ by equipment type
+    boq_by_type = {}
+    for item in boq_items:
+        etype = item['equipment_type']
+        if etype:
+            if etype not in boq_by_type:
+                boq_by_type[etype] = {
+                    'total_qty': 0,
+                    'items': [],
+                    'total_cost': 0,
+                    'avg_rate': 0,
+                }
+            boq_by_type[etype]['total_qty'] += item['qty']
+            boq_by_type[etype]['items'].append(item)
+            if item.get('total'):
+                boq_by_type[etype]['total_cost'] += item['total']
+            if item.get('rate'):
+                boq_by_type[etype]['avg_rate'] = item['rate']
+
+    # Compare each BOQ type against drawing
+    all_types = set(boq_by_type.keys()) | set(drawing_merged.keys())
+
+    for etype in sorted(all_types):
+        boq_data = boq_by_type.get(etype, {})
+        drawing_data = drawing_merged.get(etype, {})
+
+        boq_qty = boq_data.get('total_qty', 0)
+        drawing_qty = drawing_data.get('count', 0)
+        rate = boq_data.get('avg_rate', 0)
+
+        diff = drawing_qty - boq_qty
+        exposure = abs(diff) * rate if rate else 0
+
+        # Determine risk level
+        if boq_qty == 0 and drawing_qty > 0:
+            risk = 'MISSING FROM BOQ'
+        elif drawing_qty == 0 and boq_qty > 0:
+            risk = 'NOT IN DRAWING'
+        elif diff == 0:
+            risk = 'MATCH'
+        elif abs(diff) / max(boq_qty, 1) > 0.2:
+            risk = 'HIGH'
+        elif abs(diff) / max(boq_qty, 1) > 0.1:
+            risk = 'MEDIUM'
+        elif diff != 0:
+            risk = 'LOW'
+        else:
+            risk = 'MATCH'
+
+        name = etype.replace('_', ' ').title()
+
+        comparisons.append({
+            'Equipment': name,
+            'BOQ Qty': int(boq_qty) if boq_qty else '—',
+            'Drawing Qty': int(drawing_qty) if drawing_qty else '—',
+            'Difference': f"{diff:+d}" if isinstance(boq_qty, (int, float)) and isinstance(drawing_qty, (int, float)) else '—',
+            'Risk': risk,
+            'Exposure (AED)': f"{exposure:,.0f}" if exposure > 0 else '—',
+        })
+
+    return comparisons
 
 # ─── Page Config ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -215,6 +421,68 @@ else:
 
     st.markdown("---")
 
+    # ─── BOQ Comparison (if BOQ uploaded) ─────────────────────────────────────
+    if boq_file is not None:
+        st.markdown("### 📊 BOQ vs Drawing Comparison")
+
+        try:
+            boq_bytes = boq_file.read()
+            boq_items = parse_boq(boq_bytes, boq_file.name)
+
+            if boq_items:
+                comparisons = compare_boq_vs_drawing(boq_items, merged)
+
+                # Summary metrics
+                matches = sum(1 for c in comparisons if c['Risk'] == 'MATCH')
+                issues = sum(1 for c in comparisons if c['Risk'] not in ('MATCH', '—'))
+                total_exposure = sum(
+                    float(c['Exposure (AED)'].replace(',', ''))
+                    for c in comparisons
+                    if c['Exposure (AED)'] != '—'
+                )
+
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Items Matching", matches)
+                with col2:
+                    st.metric("Discrepancies", issues)
+                with col3:
+                    st.metric("Total Exposure", f"AED {total_exposure:,.0f}")
+
+                # Color-code the comparison table
+                st.dataframe(
+                    comparisons,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Equipment": st.column_config.TextColumn("Equipment", width="medium"),
+                        "BOQ Qty": st.column_config.TextColumn("BOQ", width="small"),
+                        "Drawing Qty": st.column_config.TextColumn("Drawing", width="small"),
+                        "Difference": st.column_config.TextColumn("Diff", width="small"),
+                        "Risk": st.column_config.TextColumn("Risk", width="small"),
+                        "Exposure (AED)": st.column_config.TextColumn("Exposure", width="small"),
+                    }
+                )
+
+                # Show parsed BOQ items for debugging
+                with st.expander("📄 Parsed BOQ Items", expanded=False):
+                    boq_display = []
+                    for item in boq_items:
+                        boq_display.append({
+                            "Description": item['description'][:60],
+                            "Type": (item['equipment_type'] or 'unknown').replace('_', ' ').title(),
+                            "Qty": item['qty'],
+                            "Rate": item.get('rate', '—'),
+                        })
+                    st.dataframe(boq_display, use_container_width=True, hide_index=True)
+            else:
+                st.warning("Could not parse any equipment items from the BOQ file. Check the format.")
+
+        except Exception as e:
+            st.error(f"Error reading BOQ file: {str(e)}")
+
+        st.markdown("---")
+
     # ─── Validation Results ───────────────────────────────────────────────────
     st.markdown("### ⚠️ Validation Checks")
 
@@ -225,13 +493,24 @@ else:
         st.success("All validation checks passed — no warnings.")
     else:
         for w in warnings:
-            w_str = str(w)
-            if w_str.startswith('[WARNING]'):
-                st.warning(w_str)
-            elif w_str.startswith('[CRITICAL]'):
-                st.error(w_str)
+            # Handle both string warnings and dict warnings
+            if isinstance(w, dict):
+                severity = w.get('severity', 'info')
+                msg = w.get('message', str(w))
+                if severity == 'warning':
+                    st.warning(msg)
+                elif severity == 'critical':
+                    st.error(msg)
+                else:
+                    st.info(msg)
             else:
-                st.info(w_str)
+                w_str = str(w)
+                if w_str.startswith('[WARNING]'):
+                    st.warning(w_str)
+                elif w_str.startswith('[CRITICAL]'):
+                    st.error(w_str)
+                else:
+                    st.info(w_str)
 
     st.markdown("---")
 
