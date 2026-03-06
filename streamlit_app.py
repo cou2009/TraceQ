@@ -267,15 +267,19 @@ def compare_boq_vs_drawing(boq_items, drawing_merged):
             note = "Quantities match."
 
         boq_breakdown = _format_boq_breakdown(boq_data['items'])
-        name = etype.replace('_', ' ').title()
+        name = _format_equipment_name(etype)
+        source_label = _format_source_label(source)
 
         # For VERIFY items with non-countable units, don't show misleading diff/exposure
-        if risk == 'VERIFY' and has_non_countable:
+        is_verify_non_countable = risk == 'VERIFY' and has_non_countable
+        if is_verify_non_countable:
             show_diff = '—'
             show_exposure = '—'
         else:
             show_diff = f"{int(diff):+d}" if drawing_qty > 0 else '—'
             show_exposure = f"{exposure:,.0f}" if exposure > 0 else '—'
+
+        show_drawing_qty = int(drawing_qty) if drawing_qty > 0 else '—'
 
         # Assign trace ID
         trace_counter += 1
@@ -285,18 +289,18 @@ def compare_boq_vs_drawing(boq_items, drawing_merged):
             'Trace ID': trace_id,
             'Equipment': name,
             'BOQ Qty': int(boq_qty) if boq_qty == int(boq_qty) else f"{boq_qty:,.1f}",
-            'Drawing Qty': int(drawing_qty) if drawing_qty else '—',
+            'Drawing Qty': show_drawing_qty,
             'Difference': show_diff,
             'Unit': ', '.join(sorted(units)) if units else '—',
             'Risk': risk,
             'Exposure (AED)': show_exposure,
             'Notes': note,
             'BOQ Breakdown': boq_breakdown,
-            'Detection Source': source,
-            '_exposure_num': exposure if risk != 'VERIFY' else 0,
+            'Detection Source': source_label,
+            '_exposure_num': exposure if not is_verify_non_countable else None,
             '_boq_qty': boq_qty,
-            '_drawing_qty': drawing_qty,
-            '_diff': diff,
+            '_drawing_qty': drawing_qty if drawing_qty > 0 else None,
+            '_diff': diff if not is_verify_non_countable else None,
             '_rate': avg_rate,
         })
 
@@ -306,19 +310,42 @@ def compare_boq_vs_drawing(boq_items, drawing_merged):
         if etype not in matched_drawing_types and data.get('count', 0) > 0:
             trace_counter += 1
             trace_id = f"TQ-{trace_counter:03d}"
-            name = etype.replace('_', ' ').title()
+            name = _format_equipment_name(etype)
             source = data.get('source', 'unknown')
+            source_label = _format_source_label(source)
             confidence = data.get('confidence', 0)
             missing_from_boq.append({
                 'Trace ID': trace_id,
                 'Equipment': name,
                 'Drawing Qty': data['count'],
-                'Detection': source,
+                'Detection': source_label,
                 'Confidence': f"{int(confidence * 100)}%",
-                'Notes': f"Found in drawing ({source}) but no matching BOQ line item.",
+                'Notes': f"Found in drawing via {source_label.lower()} but no matching BOQ line item.",
             })
 
     return comparisons, missing_from_boq
+
+
+def _format_equipment_name(etype):
+    """Format equipment type to proper display name, preserving acronyms."""
+    acronyms = {'fcu': 'FCU', 'vrf': 'VRF', 'vcd': 'VCD', 'sad': 'SAD', 'rad': 'RAD'}
+    name = etype.replace('_', ' ').title()
+    for key, acr in acronyms.items():
+        name = name.replace(key.title(), acr)
+    return name
+
+
+def _format_source_label(source):
+    """Convert raw engine source to clean label."""
+    if not source or source == '—':
+        return '—'
+    if 'tier1' in source:
+        return 'Layer Detection'
+    elif 'tier2' in source:
+        return 'Block Detection'
+    elif 'tier3' in source or 'SAD' in source:
+        return 'Text/Label Detection'
+    return source
 
 
 def _format_boq_breakdown(items):
@@ -383,6 +410,11 @@ def _build_verify_note(etype, boq_data, units):
 
 # ─── Excel Report Generator ──────────────────────────────────────────────────
 
+def _xl_val(v):
+    """Return '—' string for None values in Excel cells."""
+    return '—' if v is None else v
+
+
 def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name, boq_name):
     """
     Generate a professional Excel BOQ Discrepancy Report with 3 tabs:
@@ -396,17 +428,19 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
     # Styles
     header_font = Font(name='Arial', bold=True, size=11, color='FFFFFF')
     header_fill = PatternFill('solid', fgColor='1A1A2E')
-    title_font = Font(name='Arial', bold=True, size=14, color='1A1A2E')
+    title_font = Font(name='Arial', bold=True, size=16, color='1A1A2E')
     subtitle_font = Font(name='Arial', bold=False, size=10, color='666666')
     bold_font = Font(name='Arial', bold=True, size=10)
+    bold_font_big = Font(name='Arial', bold=True, size=11)
     normal_font = Font(name='Arial', size=10)
-    number_font = Font(name='Arial', size=10)
     match_fill = PatternFill('solid', fgColor='D4EDDA')
     high_fill = PatternFill('solid', fgColor='F8D7DA')
+    high_font = Font(name='Arial', size=10, bold=True, color='DC3545')
     medium_fill = PatternFill('solid', fgColor='FFF3CD')
     low_fill = PatternFill('solid', fgColor='D1ECF1')
     verify_fill = PatternFill('solid', fgColor='E8DAEF')
     missing_fill = PatternFill('solid', fgColor='FADBD8')
+    section_fill = PatternFill('solid', fgColor='F0F0F0')
     thin_border = Border(
         left=Side(style='thin', color='CCCCCC'),
         right=Side(style='thin', color='CCCCCC'),
@@ -429,9 +463,9 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
     ws1.title = "Executive Summary"
     ws1.sheet_properties.tabColor = "1A1A2E"
 
-    # Title block
     ws1['A1'] = 'TraceQ — BOQ Discrepancy Report'
     ws1['A1'].font = title_font
+    ws1.merge_cells('A1:F1')
     ws1['A2'] = f'Generated: {now}'
     ws1['A2'].font = subtitle_font
     ws1['A3'] = f'Drawing: {drawing_name}'
@@ -446,30 +480,39 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
     discrepancies = sum(1 for c in comparisons if c['Risk'] in ('HIGH', 'MEDIUM', 'LOW'))
     verify_count = sum(1 for c in comparisons if c['Risk'] == 'VERIFY')
     missing_count = len(missing_from_boq)
-    total_exposure = sum(c.get('_exposure_num', 0) for c in comparisons)
+    total_exposure = sum(c.get('_exposure_num', 0) or 0 for c in comparisons)
 
     row = 7
-    ws1.cell(row=row, column=1, value='SUMMARY').font = bold_font
+    c = ws1.cell(row=row, column=1, value='SUMMARY')
+    c.font = bold_font_big
+    c.fill = section_fill
+    for ci in range(1, 7):
+        ws1.cell(row=row, column=ci).fill = section_fill
     row += 1
+
     labels = [
-        ('Items Matching', matches),
-        ('Discrepancies Found', discrepancies),
-        ('Items Needing Verification', verify_count),
-        ('Items Missing from BOQ', missing_count),
-        ('Total Quantifiable Exposure (AED)', total_exposure),
+        ('Items Matching', matches, '#,##0'),
+        ('Discrepancies Found', discrepancies, '#,##0'),
+        ('Items Needing Verification', verify_count, '#,##0'),
+        ('Items Missing from BOQ', missing_count, '#,##0'),
+        ('Total Quantifiable Exposure (AED)', total_exposure, '#,##0'),
     ]
-    for label, val in labels:
+    for label, val, fmt in labels:
         ws1.cell(row=row, column=1, value=label).font = normal_font
         c = ws1.cell(row=row, column=2, value=val)
         c.font = bold_font
-        if isinstance(val, (int, float)) and label.startswith('Total'):
-            c.number_format = '#,##0'
+        c.number_format = fmt
         row += 1
 
     # Risk breakdown table
     row += 1
-    ws1.cell(row=row, column=1, value='RISK BREAKDOWN').font = bold_font
+    c = ws1.cell(row=row, column=1, value='RISK BREAKDOWN')
+    c.font = bold_font_big
+    c.fill = section_fill
+    for ci in range(1, 7):
+        ws1.cell(row=row, column=ci).fill = section_fill
     row += 1
+
     risk_headers = ['Trace ID', 'Equipment', 'Risk', 'BOQ Qty', 'Drawing Qty', 'Exposure (AED)']
     for col_idx, h in enumerate(risk_headers, 1):
         c = ws1.cell(row=row, column=col_idx, value=h)
@@ -479,18 +522,14 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
         c.border = thin_border
     row += 1
 
-    # Only show non-MATCH items in executive summary
     for comp in comparisons:
         if comp['Risk'] == 'MATCH':
             continue
-        vals = [
-            comp['Trace ID'],
-            comp['Equipment'],
-            comp['Risk'],
-            comp.get('_boq_qty', 0),
-            comp.get('_drawing_qty', 0),
-            comp.get('_exposure_num', 0),
-        ]
+        boq_val = _xl_val(comp.get('_boq_qty'))
+        dwg_val = _xl_val(comp.get('_drawing_qty'))
+        exp_val = _xl_val(comp.get('_exposure_num'))
+
+        vals = [comp['Trace ID'], comp['Equipment'], comp['Risk'], boq_val, dwg_val, exp_val]
         fill = risk_fills.get(comp['Risk'], None)
         for col_idx, v in enumerate(vals, 1):
             c = ws1.cell(row=row, column=col_idx, value=v)
@@ -498,39 +537,32 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
             c.border = thin_border
             if fill:
                 c.fill = fill
-            if col_idx in (4, 5):
+            if col_idx in (4, 5) and isinstance(v, (int, float)):
                 c.number_format = '#,##0'
-            if col_idx == 6:
+            if col_idx == 6 and isinstance(v, (int, float)):
                 c.number_format = '#,##0'
             c.alignment = Alignment(horizontal='center') if col_idx != 2 else Alignment(horizontal='left')
         row += 1
 
-    # Missing items in exec summary
     if missing_from_boq:
         for m in missing_from_boq:
-            vals = [
-                m['Trace ID'],
-                m['Equipment'],
-                'MISSING FROM BOQ',
-                '—',
-                m['Drawing Qty'],
-                '—',
-            ]
+            vals = [m['Trace ID'], m['Equipment'], 'MISSING FROM BOQ', '—', m['Drawing Qty'], '—']
             for col_idx, v in enumerate(vals, 1):
                 c = ws1.cell(row=row, column=col_idx, value=v)
                 c.font = normal_font
                 c.border = thin_border
                 c.fill = missing_fill
+                if col_idx == 5 and isinstance(v, (int, float)):
+                    c.number_format = '#,##0'
                 c.alignment = Alignment(horizontal='center') if col_idx != 2 else Alignment(horizontal='left')
             row += 1
 
-    # Column widths
     ws1.column_dimensions['A'].width = 35
-    ws1.column_dimensions['B'].width = 25
-    ws1.column_dimensions['C'].width = 18
-    ws1.column_dimensions['D'].width = 12
+    ws1.column_dimensions['B'].width = 28
+    ws1.column_dimensions['C'].width = 20
+    ws1.column_dimensions['D'].width = 14
     ws1.column_dimensions['E'].width = 14
-    ws1.column_dimensions['F'].width = 16
+    ws1.column_dimensions['F'].width = 18
 
     # ─── Tab 2: Discrepancy Details ───────────────────────────────────────────
     ws2 = wb.create_sheet("Discrepancy Details")
@@ -538,6 +570,7 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
 
     ws2['A1'] = 'BOQ vs Drawing — Detailed Comparison'
     ws2['A1'].font = title_font
+    ws2.merge_cells('A1:K1')
     ws2['A2'] = f'Drawing: {drawing_name} | BOQ: {boq_name}'
     ws2['A2'].font = subtitle_font
 
@@ -552,18 +585,15 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
     row += 1
 
     for comp in comparisons:
+        boq_val = comp.get('_boq_qty', 0)
+        dwg_val = _xl_val(comp.get('_drawing_qty'))
+        diff_val = _xl_val(comp.get('_diff'))
+        exp_val = _xl_val(comp.get('_exposure_num'))
+
         vals = [
-            comp['Trace ID'],
-            comp['Equipment'],
-            comp.get('_boq_qty', 0),
-            comp.get('_drawing_qty', 0),
-            comp.get('_diff', 0),
-            comp['Unit'],
-            comp['Risk'],
-            comp.get('_exposure_num', 0),
-            comp.get('Detection Source', '—'),
-            comp['Notes'],
-            comp.get('BOQ Breakdown', ''),
+            comp['Trace ID'], comp['Equipment'], boq_val, dwg_val, diff_val,
+            comp['Unit'], comp['Risk'], exp_val,
+            comp.get('Detection Source', '—'), comp['Notes'], comp.get('BOQ Breakdown', ''),
         ]
         fill = risk_fills.get(comp['Risk'], None)
         for col_idx, v in enumerate(vals, 1):
@@ -572,18 +602,17 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
             c.border = thin_border
             if fill and col_idx == 7:
                 c.fill = fill
-            if col_idx in (3, 4, 5):
+            if col_idx in (3, 4, 5) and isinstance(v, (int, float)):
                 c.number_format = '#,##0'
-            if col_idx == 8:
+            if col_idx == 8 and isinstance(v, (int, float)):
                 c.number_format = '#,##0'
             if col_idx in (10, 11):
-                c.alignment = Alignment(wrap_text=True)
+                c.alignment = Alignment(wrap_text=True, vertical='top')
             elif col_idx in (1, 3, 4, 5, 6, 7, 8):
                 c.alignment = Alignment(horizontal='center')
         row += 1
 
-    # Column widths for details tab
-    detail_widths = [12, 25, 10, 12, 10, 8, 12, 14, 22, 55, 45]
+    detail_widths = [12, 28, 12, 14, 12, 8, 12, 16, 20, 60, 50]
     for i, w in enumerate(detail_widths):
         ws2.column_dimensions[get_column_letter(i + 1)].width = w
 
@@ -593,8 +622,10 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
 
     ws3['A1'] = 'Items Detected in Drawing — Not in BOQ'
     ws3['A1'].font = title_font
+    ws3.merge_cells('A1:F1')
     ws3['A2'] = 'These items were found in the drawing but have no corresponding BOQ line item. They may represent scope gaps or items not yet priced.'
     ws3['A2'].font = subtitle_font
+    ws3.merge_cells('A2:F2')
 
     headers3 = ['Trace ID', 'Equipment', 'Drawing Qty', 'Detection Method', 'Confidence', 'Notes']
     row = 4
@@ -608,29 +639,23 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
 
     if missing_from_boq:
         for m in missing_from_boq:
-            vals = [
-                m['Trace ID'],
-                m['Equipment'],
-                m['Drawing Qty'],
-                m['Detection'],
-                m['Confidence'],
-                m['Notes'],
-            ]
+            vals = [m['Trace ID'], m['Equipment'], m['Drawing Qty'], m['Detection'], m['Confidence'], m['Notes']]
             for col_idx, v in enumerate(vals, 1):
                 c = ws3.cell(row=row, column=col_idx, value=v)
                 c.font = normal_font
                 c.border = thin_border
                 c.fill = missing_fill
+                if col_idx == 3 and isinstance(v, (int, float)):
+                    c.number_format = '#,##0'
                 if col_idx == 6:
-                    c.alignment = Alignment(wrap_text=True)
+                    c.alignment = Alignment(wrap_text=True, vertical='top')
                 else:
                     c.alignment = Alignment(horizontal='center') if col_idx != 2 else Alignment(horizontal='left')
             row += 1
     else:
         ws3.cell(row=row, column=1, value='No items missing from BOQ.').font = normal_font
 
-    # Column widths
-    not_in_boq_widths = [12, 25, 14, 22, 12, 55]
+    not_in_boq_widths = [12, 28, 14, 20, 12, 60]
     for i, w in enumerate(not_in_boq_widths):
         ws3.column_dimensions[get_column_letter(i + 1)].width = w
 
@@ -798,7 +823,7 @@ else:
             source_label = source
             tier_icon = "⚪"
 
-        name = equip_type.replace('_', ' ').title()
+        name = _format_equipment_name(equip_type)
 
         alts = []
         for k, v in alt.items():
@@ -846,7 +871,7 @@ else:
                 discrepancies = sum(1 for c in comparisons if c['Risk'] in ('HIGH', 'MEDIUM', 'LOW'))
                 verify_items = sum(1 for c in comparisons if c['Risk'] == 'VERIFY')
                 missing_count = len(missing_from_boq)
-                total_exposure = sum(c.get('_exposure_num', 0) for c in comparisons)
+                total_exposure = sum(c.get('_exposure_num') or 0 for c in comparisons)
 
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
