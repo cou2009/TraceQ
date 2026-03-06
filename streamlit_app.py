@@ -22,9 +22,10 @@ from traceq_engine import TraceQEngine, Config
 
 # ─── BOQ Parser ───────────────────────────────────────────────────────────────
 
+# ─── BOQ Keyword Map ──────────────────────────────────────────────────────────
 # Mapping: keywords in BOQ descriptions → engine equipment types
+# Order matters — more specific matches first
 BOQ_KEYWORD_MAP = [
-    # Order matters — more specific matches first
     ('FCU-1', 'fcu', 'FCU-1 Ducted'),
     ('FCU-2', 'fcu', 'FCU-2 Ducted'),
     ('FCU-3', 'fcu', 'FCU-3 Ducted'),
@@ -38,6 +39,7 @@ BOQ_KEYWORD_MAP = [
     ('RETURN AIR FLOW BAR', 'flow_bar', 'Return Air Flow Bar'),
     ('FLOW BAR', 'flow_bar', 'Flow Bar'),
     ('PLENUM BOX', 'plenum_box', 'Plenum Box'),
+    ('SUPPLY AIR VOLUME DAMPER', 'volume_control_damper', 'Supply Air Volume Damper'),
     ('VOLUME DAMPER', 'volume_control_damper', 'Volume Control Damper'),
     ('VCD', 'volume_control_damper', 'VCD'),
     ('FIRE DAMPER', 'fire_damper', 'Fire Damper'),
@@ -60,13 +62,74 @@ BOQ_KEYWORD_MAP = [
     ('INSULATION', 'insulation', 'Insulation'),
 ]
 
+# Units that can be compared directly (countable items)
+COUNTABLE_UNITS = {'nos.', 'nos', 'no.', 'no', 'pcs', 'pcs.', 'ea', 'ea.', 'each', 'set', 'sets'}
+
+
+def _detect_boq_columns(ws):
+    """
+    Detect which columns hold description, unit, qty, rate, total.
+    Scans first 10 rows for header keywords, then validates against actual data.
+    Returns dict with col indices (1-based).
+    """
+    # Default layout: B=item#, C=desc, D=unit, E=qty, F=rate, G=total
+    cols = {'desc': 3, 'unit': 4, 'qty': 5, 'rate': 6, 'total': 7, 'item_no': 2}
+
+    # Try to detect from headers
+    for row_num in range(1, min(11, ws.max_row + 1)):
+        for col_num in range(1, min(11, ws.max_column + 1)):
+            val = ws.cell(row=row_num, column=col_num).value
+            if val is None:
+                continue
+            upper = str(val).strip().upper()
+            if upper in ('UNIT', 'UOM', 'U/M'):
+                cols['unit'] = col_num
+            elif upper in ('QTY', 'QUANTITY', 'QTY.'):
+                cols['qty'] = col_num
+            elif 'RATE' in upper and 'TOTAL' not in upper:
+                cols['rate'] = col_num
+            elif 'TOTAL' in upper:
+                cols['total'] = col_num
+
+    # Description column: look for the column that consistently has text strings
+    # in the data rows (not the header). This is more reliable than the header
+    # position since DESCRIPTION header may be merged or offset.
+    # Check a few data rows (rows 5-15) to find where string descriptions live.
+    text_col_counts = {}
+    for row_num in range(5, min(20, ws.max_row + 1)):
+        for col_num in range(1, min(8, ws.max_column + 1)):
+            val = ws.cell(row=row_num, column=col_num).value
+            if isinstance(val, str) and len(val.strip()) > 5:
+                text_col_counts[col_num] = text_col_counts.get(col_num, 0) + 1
+
+    if text_col_counts:
+        # The column with the most long text strings is likely the description column
+        best_col = max(text_col_counts, key=text_col_counts.get)
+        cols['desc'] = best_col
+        # Item number is typically one column before description
+        cols['item_no'] = best_col - 1 if best_col > 1 else 1
+
+    return cols
+
+
+def _classify_description(desc_text):
+    """
+    Classify a BOQ description string into an equipment type.
+    Returns (equipment_type, equipment_label) or (None, desc_text).
+    """
+    upper = desc_text.upper().strip()
+    for keyword, etype, label in BOQ_KEYWORD_MAP:
+        if keyword in upper:
+            return etype, label
+    return None, desc_text
+
 
 def parse_boq(file_bytes, filename):
     """
-    Parse a BOQ Excel file and extract equipment items.
-    Returns list of dicts: [{description, equipment_type, qty, unit, rate, total}]
+    Parse a BOQ Excel file and extract equipment line items.
+    Uses column-position detection (not heuristic scanning).
+    Returns list of dicts: [{description, equipment_type, qty, unit, rate, total, boq_ref}]
     """
-    # Save to temp file for openpyxl
     suffix = os.path.splitext(filename)[1].lower() or '.xlsx'
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp.write(file_bytes)
@@ -76,74 +139,67 @@ def parse_boq(file_bytes, filename):
         wb = openpyxl.load_workbook(tmp_path, data_only=True)
         ws = wb.active
 
+        cols = _detect_boq_columns(ws)
         items = []
-        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, values_only=True):
-            # Find rows that have a description and a numeric quantity
-            # BOQ format: col B = item#/desc, col C = desc, col D = unit, col E = qty, col F = rate, col G = total
-            # But format varies — scan all columns for description + qty
-            desc = None
-            qty = None
-            unit = None
-            rate = None
-            total = None
+        item_counter = 0
 
-            for i, val in enumerate(row):
-                if val is None:
-                    continue
-                s = str(val).strip()
-                if not s:
-                    continue
+        for row_num in range(1, ws.max_row + 1):
+            # Read fixed columns
+            item_no_val = ws.cell(row=row_num, column=cols['item_no']).value
+            desc_val = ws.cell(row=row_num, column=cols['desc']).value
+            unit_val = ws.cell(row=row_num, column=cols['unit']).value
+            qty_val = ws.cell(row=row_num, column=cols['qty']).value
+            rate_val = ws.cell(row=row_num, column=cols['rate']).value
+            total_val = ws.cell(row=row_num, column=cols['total']).value
 
-                # Look for quantity (numeric, reasonable range)
-                if qty is None and isinstance(val, (int, float)) and 0 < val < 100000:
-                    # Check if this is likely a qty (not a rate or item number)
-                    # Heuristic: if we already found a description, this could be qty
-                    if desc and i > 1:
-                        qty = val
-                        # Try to get unit, rate, total from subsequent columns
-                        remaining = row[i+1:] if i+1 < len(row) else []
-                        for j, rv in enumerate(remaining):
-                            if rv is None:
-                                continue
-                            if isinstance(rv, str) and rv.strip():
-                                if unit is None:
-                                    unit = rv.strip()
-                            if isinstance(rv, (int, float)):
-                                if rate is None:
-                                    rate = rv
-                                elif total is None:
-                                    total = rv
-                        break
+            # Skip rows without a description
+            if desc_val is None:
+                continue
+            desc_str = str(desc_val).strip()
+            if len(desc_str) < 3:
+                continue
 
-                # Look for description (string with equipment keywords)
-                if desc is None and isinstance(val, str) and len(s) > 3:
-                    upper = s.upper()
-                    # Check if this looks like an equipment description
-                    for keyword, _, _ in BOQ_KEYWORD_MAP:
-                        if keyword in upper:
-                            desc = s
-                            break
+            # Need a valid numeric quantity
+            if qty_val is None:
+                continue
+            try:
+                qty = float(qty_val)
+            except (ValueError, TypeError):
+                continue
+            if qty <= 0:
+                continue
 
-            if desc and qty and qty > 0:
-                # Classify the description
-                equip_type = None
-                equip_label = desc
-                upper_desc = desc.upper()
-                for keyword, etype, label in BOQ_KEYWORD_MAP:
-                    if keyword in upper_desc:
-                        equip_type = etype
-                        equip_label = label
-                        break
+            # Classify the description
+            equip_type, equip_label = _classify_description(desc_str)
 
-                items.append({
-                    'description': desc,
-                    'equipment_type': equip_type,
-                    'equipment_label': equip_label,
-                    'qty': qty,
-                    'unit': unit,
-                    'rate': rate,
-                    'total': total,
-                })
+            # Parse unit
+            unit_str = str(unit_val).strip() if unit_val else None
+
+            # Parse rate and total
+            try:
+                rate = float(rate_val) if rate_val else None
+            except (ValueError, TypeError):
+                rate = None
+            try:
+                total = float(total_val) if total_val else None
+            except (ValueError, TypeError):
+                total = None
+
+            # Build reference number
+            item_counter += 1
+            boq_ref = str(item_no_val).strip() if item_no_val else str(item_counter)
+
+            items.append({
+                'description': desc_str,
+                'equipment_type': equip_type,
+                'equipment_label': equip_label,
+                'qty': qty,
+                'unit': unit_str,
+                'rate': rate,
+                'total': total,
+                'boq_ref': boq_ref,
+                'is_countable': (unit_str or '').lower().strip('.') in {'nos', 'no', 'pcs', 'ea', 'each', 'set', 'sets'},
+            })
 
         os.unlink(tmp_path)
         return items
@@ -155,72 +211,190 @@ def parse_boq(file_bytes, filename):
 
 def compare_boq_vs_drawing(boq_items, drawing_merged):
     """
-    Compare BOQ items against drawing detection results.
-    Returns list of comparison rows.
+    Compare BOQ line items against drawing detection results.
+    Returns (comparisons, missing_from_boq) where:
+      - comparisons: list of dicts for the main comparison table
+      - missing_from_boq: list of dicts for equipment in drawing but not in BOQ
     """
     comparisons = []
 
-    # Aggregate BOQ by equipment type
+    # ── Group BOQ items by equipment type ──
+    # Keep individual line items visible but also aggregate for comparison
     boq_by_type = {}
     for item in boq_items:
         etype = item['equipment_type']
-        if etype:
-            if etype not in boq_by_type:
-                boq_by_type[etype] = {
-                    'total_qty': 0,
-                    'items': [],
-                    'total_cost': 0,
-                    'avg_rate': 0,
-                }
-            boq_by_type[etype]['total_qty'] += item['qty']
-            boq_by_type[etype]['items'].append(item)
-            if item.get('total'):
-                boq_by_type[etype]['total_cost'] += item['total']
-            if item.get('rate'):
-                boq_by_type[etype]['avg_rate'] = item['rate']
+        if etype is None:
+            continue
+        if etype not in boq_by_type:
+            boq_by_type[etype] = {
+                'total_qty': 0,
+                'items': [],
+                'total_cost': 0,
+                'rates': [],
+                'units': set(),
+            }
+        boq_by_type[etype]['total_qty'] += item['qty']
+        boq_by_type[etype]['items'].append(item)
+        if item.get('total'):
+            boq_by_type[etype]['total_cost'] += item['total']
+        if item.get('rate') and item['rate'] > 0:
+            boq_by_type[etype]['rates'].append(item['rate'])
+        if item.get('unit'):
+            boq_by_type[etype]['units'].add(item['unit'].strip().lower())
 
-    # Compare each BOQ type against drawing
-    all_types = set(boq_by_type.keys()) | set(drawing_merged.keys())
+    # ── Build comparison for each BOQ equipment type ──
+    matched_drawing_types = set()
 
-    for etype in sorted(all_types):
-        boq_data = boq_by_type.get(etype, {})
+    for etype in sorted(boq_by_type.keys()):
+        boq_data = boq_by_type[etype]
         drawing_data = drawing_merged.get(etype, {})
+        matched_drawing_types.add(etype)
 
-        boq_qty = boq_data.get('total_qty', 0)
+        boq_qty = boq_data['total_qty']
         drawing_qty = drawing_data.get('count', 0)
-        rate = boq_data.get('avg_rate', 0)
+        source = drawing_data.get('source', '—')
+        rates = boq_data['rates']
+        avg_rate = sum(rates) / len(rates) if rates else 0
+        units = boq_data['units']
 
-        diff = drawing_qty - boq_qty
-        exposure = abs(diff) * rate if rate else 0
+        # Check if units are countable (nos) — if not, flag as VERIFY
+        has_non_countable = any(u.strip('.') not in ('nos', 'no', 'pcs', 'ea', 'each', 'set', 'sets') for u in units)
 
-        # Determine risk level
-        if boq_qty == 0 and drawing_qty > 0:
-            risk = 'MISSING FROM BOQ'
+        diff = drawing_qty - boq_qty if drawing_qty > 0 else 0
+        exposure = abs(diff) * avg_rate if avg_rate and drawing_qty > 0 else 0
+
+        # ── Determine risk level ──
+        if has_non_countable and drawing_qty == 0:
+            risk = 'VERIFY'
+            note = _build_verify_note(etype, boq_data, units)
         elif drawing_qty == 0 and boq_qty > 0:
-            risk = 'NOT IN DRAWING'
+            risk = 'VERIFY'
+            note = f"BOQ has {int(boq_qty)} but not detected in drawing. May require manual check."
         elif diff == 0:
             risk = 'MATCH'
+            note = "Quantities match."
+        elif has_non_countable:
+            risk = 'VERIFY'
+            note = _build_verify_note(etype, boq_data, units)
         elif abs(diff) / max(boq_qty, 1) > 0.2:
             risk = 'HIGH'
+            note = _build_discrepancy_note(etype, boq_data, drawing_data, diff)
         elif abs(diff) / max(boq_qty, 1) > 0.1:
             risk = 'MEDIUM'
+            note = _build_discrepancy_note(etype, boq_data, drawing_data, diff)
         elif diff != 0:
             risk = 'LOW'
+            note = _build_discrepancy_note(etype, boq_data, drawing_data, diff)
         else:
             risk = 'MATCH'
+            note = "Quantities match."
 
+        # BOQ breakdown string (shows individual line items)
+        boq_breakdown = _format_boq_breakdown(boq_data['items'])
         name = etype.replace('_', ' ').title()
+
+        # For VERIFY items with non-countable units, don't show misleading diff/exposure
+        if risk == 'VERIFY' and has_non_countable:
+            show_diff = '—'
+            show_exposure = '—'
+        else:
+            show_diff = f"{int(diff):+d}" if drawing_qty > 0 else '—'
+            show_exposure = f"{exposure:,.0f}" if exposure > 0 else '—'
 
         comparisons.append({
             'Equipment': name,
-            'BOQ Qty': int(boq_qty) if boq_qty else '—',
+            'BOQ Qty': int(boq_qty) if boq_qty == int(boq_qty) else f"{boq_qty:,.1f}",
             'Drawing Qty': int(drawing_qty) if drawing_qty else '—',
-            'Difference': f"{int(diff):+d}" if isinstance(boq_qty, (int, float)) and isinstance(drawing_qty, (int, float)) else '—',
+            'Difference': show_diff,
+            'Unit': ', '.join(sorted(units)) if units else '—',
             'Risk': risk,
-            'Exposure (AED)': f"{exposure:,.0f}" if exposure > 0 else '—',
+            'Exposure (AED)': show_exposure,
+            'Notes': note,
+            'BOQ Breakdown': boq_breakdown,
         })
 
-    return comparisons
+    # ── Missing from BOQ: items in drawing but not in any BOQ type ──
+    missing_from_boq = []
+    for etype, data in sorted(drawing_merged.items()):
+        if etype not in matched_drawing_types and data.get('count', 0) > 0:
+            name = etype.replace('_', ' ').title()
+            source = data.get('source', 'unknown')
+            confidence = data.get('confidence', 0)
+            missing_from_boq.append({
+                'Equipment': name,
+                'Drawing Qty': data['count'],
+                'Detection': source,
+                'Confidence': f"{int(confidence * 100)}%",
+                'Notes': f"Found in drawing ({source}) but no matching BOQ line item.",
+            })
+
+    return comparisons, missing_from_boq
+
+
+def _format_boq_breakdown(items):
+    """Format individual BOQ line items into a readable string."""
+    if len(items) == 1:
+        return items[0]['description'][:60]
+    parts = []
+    for item in items:
+        desc_short = item['description'][:40]
+        parts.append(f"{desc_short}: {int(item['qty']) if item['qty'] == int(item['qty']) else item['qty']}")
+    return " | ".join(parts)
+
+
+def _build_discrepancy_note(etype, boq_data, drawing_data, diff):
+    """Build an explanatory note for a quantity discrepancy."""
+    drawing_qty = drawing_data.get('count', 0)
+    boq_qty = boq_data['total_qty']
+    source = drawing_data.get('source', 'detection')
+
+    # Clean up source label
+    if 'tier1' in source:
+        source_label = "layer detection"
+    elif 'tier2' in source:
+        source_label = "block detection"
+    elif 'tier3' in source or 'SAD' in source:
+        source_label = "text/label detection"
+    else:
+        source_label = source
+
+    if diff > 0:
+        note = f"Drawing shows {int(drawing_qty)} via {source_label} — {abs(int(diff))} more than BOQ ({int(boq_qty)})."
+    else:
+        note = f"Drawing shows {int(drawing_qty)} via {source_label} — {abs(int(diff))} fewer than BOQ ({int(boq_qty)})."
+
+    # Add sub-item breakdown if multiple BOQ items
+    if len(boq_data['items']) > 1:
+        sub_parts = []
+        for item in boq_data['items']:
+            short = item['description'][:35]
+            sub_parts.append(f"{short}={int(item['qty'])}")
+        note += f" BOQ breakdown: {', '.join(sub_parts)}."
+
+    # Add context-aware notes for known edge cases
+    if etype == 'return_diffuser' and diff > 0:
+        note += " Note: block detection may double-count *U16/*U17 inserts — verify against drawing legend."
+    elif etype == 'vrf' and diff < 0:
+        note += " Note: drawing detects unique VRF labels only — BOQ may list individual modules per system."
+    elif etype == 'flow_bar' and diff < 0:
+        note += " Note: flow bars often lack distinct block markers — text detection may undercount."
+    elif etype == 'volume_control_damper' and len(boq_data['items']) > 1:
+        note += " Note: BOQ may list different damper sizes separately — verify each size against drawing."
+
+    return note
+
+
+def _build_verify_note(etype, boq_data, units):
+    """Build a note explaining why an item needs manual verification."""
+    unit_list = ', '.join(sorted(units))
+    boq_qty = boq_data['total_qty']
+
+    if any(u.strip('.') in ('sqm', 'sq.m', 'sq m', 'm2', 'sqft') for u in units):
+        return f"BOQ quantity is in area ({unit_list}) = {boq_qty:,.1f}. Cannot compare directly with drawing count. Manual verification required."
+    elif any(u.strip('.') in ('mtrs', 'mtr', 'm', 'lm', 'rm') for u in units):
+        return f"BOQ quantity is in length ({unit_list}) = {boq_qty:,.1f}. Cannot compare directly with drawing count. Manual verification required."
+    else:
+        return f"Unit mismatch ({unit_list}). BOQ qty = {boq_qty:,.1f}. Needs human review."
 
 # ─── Page Config ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -423,56 +597,98 @@ else:
 
     # ─── BOQ Comparison (if BOQ uploaded) ─────────────────────────────────────
     if boq_file is not None:
-        st.markdown("### 📊 BOQ vs Drawing Comparison")
+        st.markdown("### 📊 BOQ Discrepancy Report")
 
         try:
             boq_bytes = boq_file.read()
             boq_items = parse_boq(boq_bytes, boq_file.name)
 
             if boq_items:
-                comparisons = compare_boq_vs_drawing(boq_items, merged)
+                comparisons, missing_from_boq = compare_boq_vs_drawing(boq_items, merged)
 
-                # Summary metrics
+                # ── Summary Metrics ──
                 matches = sum(1 for c in comparisons if c['Risk'] == 'MATCH')
-                issues = sum(1 for c in comparisons if c['Risk'] not in ('MATCH', '—'))
+                discrepancies = sum(1 for c in comparisons if c['Risk'] in ('HIGH', 'MEDIUM', 'LOW'))
+                verify_items = sum(1 for c in comparisons if c['Risk'] == 'VERIFY')
+                missing_count = len(missing_from_boq)
                 total_exposure = sum(
                     float(c['Exposure (AED)'].replace(',', ''))
                     for c in comparisons
                     if c['Exposure (AED)'] != '—'
                 )
 
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3, col4 = st.columns(4)
                 with col1:
-                    st.metric("Items Matching", matches)
+                    st.metric("Matching", matches)
                 with col2:
-                    st.metric("Discrepancies", issues)
+                    st.metric("Discrepancies", discrepancies)
                 with col3:
+                    st.metric("Needs Verification", verify_items)
+                with col4:
                     st.metric("Total Exposure", f"AED {total_exposure:,.0f}")
 
-                # Color-code the comparison table
+                # ── Main Comparison Table ──
+                st.markdown("#### Comparison Details")
+
+                # Show main table without the breakdown column (keep it in expander)
+                display_comparisons = []
+                for c in comparisons:
+                    display_comparisons.append({
+                        'Equipment': c['Equipment'],
+                        'BOQ Qty': c['BOQ Qty'],
+                        'Drawing Qty': c['Drawing Qty'],
+                        'Diff': c['Difference'],
+                        'Unit': c['Unit'],
+                        'Risk': c['Risk'],
+                        'Exposure (AED)': c['Exposure (AED)'],
+                        'Notes': c['Notes'],
+                    })
+
                 st.dataframe(
-                    comparisons,
+                    display_comparisons,
                     use_container_width=True,
                     hide_index=True,
                     column_config={
                         "Equipment": st.column_config.TextColumn("Equipment", width="medium"),
                         "BOQ Qty": st.column_config.TextColumn("BOQ", width="small"),
                         "Drawing Qty": st.column_config.TextColumn("Drawing", width="small"),
-                        "Difference": st.column_config.TextColumn("Diff", width="small"),
+                        "Diff": st.column_config.TextColumn("Diff", width="small"),
+                        "Unit": st.column_config.TextColumn("Unit", width="small"),
                         "Risk": st.column_config.TextColumn("Risk", width="small"),
                         "Exposure (AED)": st.column_config.TextColumn("Exposure", width="small"),
+                        "Notes": st.column_config.TextColumn("Notes", width="large"),
                     }
                 )
 
-                # Show parsed BOQ items for debugging
-                with st.expander("📄 Parsed BOQ Items", expanded=False):
+                # ── Missing from BOQ ──
+                if missing_from_boq:
+                    st.markdown(f"#### Items in Drawing Not in BOQ ({missing_count} items)")
+                    st.caption("These items were detected in the drawing but have no corresponding BOQ line item.")
+                    st.dataframe(
+                        missing_from_boq,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Equipment": st.column_config.TextColumn("Equipment", width="medium"),
+                            "Drawing Qty": st.column_config.NumberColumn("Qty", width="small"),
+                            "Detection": st.column_config.TextColumn("Detection", width="medium"),
+                            "Confidence": st.column_config.TextColumn("Confidence", width="small"),
+                            "Notes": st.column_config.TextColumn("Notes", width="large"),
+                        }
+                    )
+
+                # ── Parsed BOQ Line Items (detail expander) ──
+                with st.expander("📄 Parsed BOQ Line Items", expanded=False):
                     boq_display = []
                     for item in boq_items:
                         boq_display.append({
-                            "Description": item['description'][:60],
-                            "Type": (item['equipment_type'] or 'unknown').replace('_', ' ').title(),
-                            "Qty": item['qty'],
-                            "Rate": item.get('rate', '—'),
+                            "Ref": item.get('boq_ref', '—'),
+                            "Description": item['description'][:70],
+                            "Type": (item['equipment_type'] or '—').replace('_', ' ').title(),
+                            "Unit": item.get('unit', '—'),
+                            "Qty": int(item['qty']) if item['qty'] == int(item['qty']) else item['qty'],
+                            "Rate": f"{item['rate']:,.0f}" if item.get('rate') else '—',
+                            "Total": f"{item['total']:,.0f}" if item.get('total') else '—',
                         })
                     st.dataframe(boq_display, use_container_width=True, hide_index=True)
             else:
