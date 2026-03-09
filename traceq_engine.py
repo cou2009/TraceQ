@@ -107,7 +107,18 @@ class FileConverter:
 
         dxf_path = os.path.join(output_dir, Path(dwg_path).stem + '.dxf')
 
-        # Try LibreDWG
+        # Method 1: Try aspose-cad (Python library — works on all platforms)
+        try:
+            import aspose.cad as cad
+            image = cad.Image.load(dwg_path)
+            opts = cad.imageoptions.DxfOptions()
+            image.save(dxf_path, opts)
+            if os.path.exists(dxf_path):
+                return dxf_path
+        except (ImportError, Exception):
+            pass
+
+        # Method 2: Try LibreDWG command line (fallback)
         try:
             result = subprocess.run(
                 ['dwg2dxf', '-o', dxf_path, dwg_path],
@@ -118,7 +129,7 @@ class FileConverter:
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
 
-        # Try ODA File Converter
+        # Method 3: Try ODA File Converter (fallback)
         try:
             result = subprocess.run(
                 ['ODAFileConverter', os.path.dirname(dwg_path), output_dir,
@@ -132,8 +143,7 @@ class FileConverter:
 
         raise RuntimeError(
             f"Cannot convert DWG to DXF. No converter available.\n"
-            f"Install libredwg-tools (apt) or ODA File Converter.\n"
-            f"Or convert manually: AutoCAD → Save As → DXF"
+            f"Please convert manually: AutoCAD → File → Save As → DXF"
         )
 
 
