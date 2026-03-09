@@ -1174,6 +1174,121 @@ class AnalysisResult:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# QUICK SCAN RESULT (Step 0)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class QuickScanResult:
+    """Container for Step 0 quick scan compatibility results."""
+
+    def __init__(self, filepath, total_layers, hvac_candidate_layers,
+                 recognised_layers, unrecognised_layers, non_equipment_layers,
+                 total_blocks, recognised_blocks, unrecognised_blocks,
+                 mtext_count, mtext_pattern_hits, total_mtext_patterns,
+                 layer_score, block_score, mtext_score, overall_score,
+                 verdict, verdict_msg, total_entities, total_inserts):
+        self.filepath = filepath
+        self.total_layers = total_layers
+        self.hvac_candidate_layers = hvac_candidate_layers
+        self.recognised_layers = recognised_layers
+        self.unrecognised_layers = unrecognised_layers
+        self.non_equipment_layers = non_equipment_layers
+        self.total_blocks = total_blocks
+        self.recognised_blocks = recognised_blocks
+        self.unrecognised_blocks = unrecognised_blocks
+        self.mtext_count = mtext_count
+        self.mtext_pattern_hits = mtext_pattern_hits
+        self.total_mtext_patterns = total_mtext_patterns
+        self.layer_score = layer_score
+        self.block_score = block_score
+        self.mtext_score = mtext_score
+        self.overall_score = overall_score
+        self.verdict = verdict
+        self.verdict_msg = verdict_msg
+        self.total_entities = total_entities
+        self.total_inserts = total_inserts
+        self.timestamp = datetime.now().isoformat()
+        self._dwg_unsupported = False
+
+    @classmethod
+    def dwg_not_supported(cls, filepath):
+        """Return a result indicating DWG conversion is not available."""
+        result = cls(
+            filepath=filepath, total_layers=0, hvac_candidate_layers=0,
+            recognised_layers=[], unrecognised_layers=[], non_equipment_layers=[],
+            total_blocks=0, recognised_blocks=[], unrecognised_blocks=[],
+            mtext_count=0, mtext_pattern_hits=0, total_mtext_patterns=0,
+            layer_score=0, block_score=0, mtext_score=0, overall_score=0,
+            verdict='DWG_UNSUPPORTED',
+            verdict_msg='DWG file detected but no converter is installed. Please convert to DXF first (AutoCAD → Save As → DXF).',
+            total_entities=0, total_inserts=0,
+        )
+        result._dwg_unsupported = True
+        return result
+
+    def summary(self):
+        """Human-readable summary for display."""
+        lines = []
+        lines.append("=" * 70)
+        lines.append("TRACEQ STEP 0 — QUICK COMPATIBILITY SCAN")
+        lines.append("=" * 70)
+        lines.append(f"File: {os.path.basename(self.filepath)}")
+        lines.append(f"Scan Date: {self.timestamp}")
+        lines.append(f"Total Entities: {self.total_entities:,}")
+        lines.append(f"Total INSERTs: {self.total_inserts:,}")
+        lines.append("")
+        lines.append(f"OVERALL COMPATIBILITY: {self.overall_score}% — {self.verdict}")
+        lines.append(f"{self.verdict_msg}")
+        lines.append("")
+        lines.append(f"Layers:  {len(self.recognised_layers)}/{self.hvac_candidate_layers} recognised ({self.layer_score}%)")
+        lines.append(f"Blocks:  {len(self.recognised_blocks)}/{self.total_blocks} recognised ({self.block_score}%)")
+        lines.append(f"Text:    {self.mtext_pattern_hits}/{self.total_mtext_patterns} patterns found ({self.mtext_score}%)")
+        lines.append("")
+
+        if self.recognised_layers:
+            lines.append("Recognised layers:")
+            for rl in self.recognised_layers:
+                lines.append(f"  ✓ {rl['layer']} → {rl['equipment_type']} ({rl['confidence']:.0%})")
+
+        if self.unrecognised_layers:
+            lines.append("Unrecognised layers (may contain equipment):")
+            for ul in self.unrecognised_layers:
+                lines.append(f"  ? {ul}")
+
+        if self.recognised_blocks:
+            lines.append("Recognised blocks:")
+            for rb in self.recognised_blocks:
+                lines.append(f"  ✓ {rb['block']} → {rb['equipment_type']} (×{rb['count']})")
+
+        if self.unrecognised_blocks:
+            lines.append("Unrecognised blocks:")
+            for ub in self.unrecognised_blocks:
+                lines.append(f"  ? {ub['block']} (×{ub['count']})")
+
+        lines.append("")
+        lines.append("=" * 70)
+        return '\n'.join(lines)
+
+    def to_dict(self):
+        """Export as dictionary."""
+        return {
+            'filepath': self.filepath,
+            'timestamp': self.timestamp,
+            'overall_score': self.overall_score,
+            'verdict': self.verdict,
+            'verdict_msg': self.verdict_msg,
+            'layer_score': self.layer_score,
+            'block_score': self.block_score,
+            'mtext_score': self.mtext_score,
+            'recognised_layers': self.recognised_layers,
+            'unrecognised_layers': self.unrecognised_layers,
+            'recognised_blocks': self.recognised_blocks,
+            'unrecognised_blocks': [dict(ub) for ub in self.unrecognised_blocks],
+            'total_entities': self.total_entities,
+            'total_inserts': self.total_inserts,
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # MAIN ENGINE (Orchestrator)
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1192,6 +1307,171 @@ class TraceQEngine:
         self.classifier = LayerClassifier(self.config)
         self.detector = EquipmentDetector(self.config, self.classifier)
         self.validator = ValidationEngine(self.config)
+
+    def quick_scan(self, filepath):
+        """
+        Step 0: Quick compatibility scan.
+        Parses the DXF/DWG file and checks how many layers and blocks
+        the engine recognises against its config files.
+        Returns a QuickScanResult with compatibility scores.
+        """
+        filepath = os.path.abspath(filepath)
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"File not found: {filepath}")
+
+        # Handle DWG — for quick scan, we still need DXF
+        file_type = FileConverter.detect_type(filepath)
+        if file_type == 'dwg':
+            try:
+                filepath = FileConverter.convert_dwg_to_dxf(filepath)
+            except RuntimeError:
+                return QuickScanResult.dwg_not_supported(filepath)
+        elif file_type != 'dxf':
+            raise ValueError(f"Unsupported file type: {file_type}")
+
+        # Parse with pure Python parser (lightweight, no dependencies)
+        parser = DXFParser(filepath)
+        parser.parse()
+
+        # --- Layer compatibility ---
+        layer_names = list(parser.layers.keys())
+        ignore_patterns = self.config.ignore_layer_patterns
+
+        # Filter out obvious non-equipment layers (TEXT, DIM, XREF, etc.)
+        hvac_candidate_layers = []
+        non_equipment_layers = []
+        for lname in layer_names:
+            upper = lname.upper()
+            is_ignored = False
+            for pat in ignore_patterns:
+                if pat.upper() in upper and not any(
+                    eq in upper for eq in ['DIFF', 'EQUIP', 'FCU', 'VCD', 'FD', 'THERMO']
+                ):
+                    is_ignored = True
+                    break
+            if is_ignored:
+                non_equipment_layers.append(lname)
+            else:
+                hvac_candidate_layers.append(lname)
+
+        # Classify candidate layers
+        recognised_layers = []
+        unrecognised_layers = []
+        for lname in hvac_candidate_layers:
+            equip_type, confidence, method = self.classifier.classify(lname)
+            if equip_type and confidence >= 0.3:
+                recognised_layers.append({
+                    'layer': lname,
+                    'equipment_type': equip_type,
+                    'confidence': confidence,
+                    'method': method,
+                })
+            else:
+                unrecognised_layers.append(lname)
+
+        # --- Block compatibility ---
+        block_names = list(parser.insert_counts_by_block.keys())
+        known_blocks = self.config.blocks
+        prefix_rules = self.config.block_prefix_rules
+
+        recognised_blocks = []
+        unrecognised_blocks = []
+        for bname in block_names:
+            count = parser.insert_counts_by_block[bname]
+            # Check exact match
+            if bname in known_blocks:
+                recognised_blocks.append({
+                    'block': bname,
+                    'equipment_type': known_blocks[bname]['equipment_type'],
+                    'count': count,
+                    'match': 'exact',
+                })
+                continue
+            # Check prefix rules
+            prefix_matched = False
+            for prefix, rule in prefix_rules.items():
+                if bname.startswith(prefix) or bname.upper().startswith(prefix.upper()):
+                    if rule.get('default_type'):
+                        recognised_blocks.append({
+                            'block': bname,
+                            'equipment_type': rule['default_type'],
+                            'count': count,
+                            'match': f'prefix:{prefix}',
+                        })
+                        prefix_matched = True
+                        break
+            if not prefix_matched:
+                # Skip blocks that are clearly not equipment (low entity count, model space, etc.)
+                if bname.startswith('*Model') or bname.startswith('*Paper'):
+                    continue
+                unrecognised_blocks.append({
+                    'block': bname,
+                    'count': count,
+                })
+
+        # --- MTEXT compatibility ---
+        mtext_count = len(parser.mtext_entities) + len(parser.text_entities)
+        mtext_patterns = self.config.mtext_patterns
+        mtext_hits = 0
+        all_text = '\n'.join(
+            [mt['text'] for mt in parser.mtext_entities] +
+            [t['text'] for t in parser.text_entities]
+        )
+        for equip_type, pdef in mtext_patterns.items():
+            for pattern in pdef.get('patterns', []):
+                try:
+                    if re.search(pattern, all_text, re.IGNORECASE):
+                        mtext_hits += 1
+                        break
+                except re.error:
+                    continue
+
+        # --- Compute scores ---
+        total_candidate_layers = len(hvac_candidate_layers)
+        layer_score = (len(recognised_layers) / total_candidate_layers * 100) if total_candidate_layers > 0 else 0
+
+        total_blocks = len(block_names)
+        block_score = (len(recognised_blocks) / total_blocks * 100) if total_blocks > 0 else 0
+
+        total_mtext_patterns = len(mtext_patterns)
+        mtext_score = (mtext_hits / total_mtext_patterns * 100) if total_mtext_patterns > 0 else 0
+
+        # Overall compatibility: weighted average (layers 40%, blocks 40%, mtext 20%)
+        overall = (layer_score * 0.4) + (block_score * 0.4) + (mtext_score * 0.2)
+
+        # Determine verdict
+        if overall >= 60:
+            verdict = 'HIGH'
+            verdict_msg = 'Good compatibility. TraceQ should produce reliable results. Nestor review will be light.'
+        elif overall >= 30:
+            verdict = 'MEDIUM'
+            verdict_msg = 'Moderate compatibility. TraceQ will catch common items but some will be missed. Nestor should expect more corrections.'
+        else:
+            verdict = 'LOW'
+            verdict_msg = 'Low compatibility. This project uses naming conventions TraceQ hasn\'t seen before. Nestor\'s corrections will significantly expand the dictionary.'
+
+        return QuickScanResult(
+            filepath=filepath,
+            total_layers=len(layer_names),
+            hvac_candidate_layers=total_candidate_layers,
+            recognised_layers=recognised_layers,
+            unrecognised_layers=unrecognised_layers,
+            non_equipment_layers=non_equipment_layers,
+            total_blocks=total_blocks,
+            recognised_blocks=recognised_blocks,
+            unrecognised_blocks=unrecognised_blocks,
+            mtext_count=mtext_count,
+            mtext_pattern_hits=mtext_hits,
+            total_mtext_patterns=total_mtext_patterns,
+            layer_score=round(layer_score, 1),
+            block_score=round(block_score, 1),
+            mtext_score=round(mtext_score, 1),
+            overall_score=round(overall, 1),
+            verdict=verdict,
+            verdict_msg=verdict_msg,
+            total_entities=parser.total_entities,
+            total_inserts=len(parser.inserts),
+        )
 
     def analyze(self, filepath):
         """

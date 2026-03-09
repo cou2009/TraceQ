@@ -20,7 +20,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 # Import the TraceQ engine (same directory)
-from traceq_engine import TraceQEngine, Config
+from traceq_engine import TraceQEngine, Config, QuickScanResult, FileConverter
 
 
 # ─── BOQ Parser ───────────────────────────────────────────────────────────────
@@ -737,8 +737,19 @@ with st.sidebar:
         "3. Text label analysis"
     )
     st.markdown("---")
+    st.markdown("### DWG Support")
+    st.markdown(
+        "✅ **DWG files are supported.** Upload a DWG directly and "
+        "TraceQ will convert it to DXF automatically on the server."
+    )
+    st.markdown(
+        "_If auto-conversion fails, you can also convert manually:_\n"
+        "- **AutoCAD/BricsCAD**: File → Save As → DXF\n"
+        "- **Online**: [CloudConvert](https://cloudconvert.com/dwg-to-dxf)"
+    )
+    st.markdown("---")
     st.markdown("*Built by [TechTelligence](mailto:nicholas@ttelligence.com)*")
-    st.markdown("*v1.0 — March 2026*")
+    st.markdown("*v1.2 — March 2026*")
 
 
 # ─── Main Content ─────────────────────────────────────────────────────────────
@@ -762,316 +773,440 @@ if drawing_file is None:
     st.info("👈 Upload a DXF or DWG file in the sidebar to get started.")
 
 else:
-    # ─── Run Analysis ─────────────────────────────────────────────────────────
-    with st.spinner("Analysing drawing... this may take a moment."):
-        file_ext = os.path.splitext(drawing_file.name)[1].lower() or '.dxf'
-        with tempfile.NamedTemporaryFile(suffix=file_ext, delete=False) as tmp:
-            tmp.write(drawing_file.read())
-            tmp_path = tmp.name
+    # Save uploaded file to temp for reuse
+    file_ext = os.path.splitext(drawing_file.name)[1].lower() or '.dxf'
+    with tempfile.NamedTemporaryFile(suffix=file_ext, delete=False) as tmp:
+        tmp.write(drawing_file.read())
+        tmp_path = tmp.name
+
+    # ─── DWG → DXF Auto-Conversion ───────────────────────────────────────────
+    dwg_converted = False
+    if file_ext == '.dwg':
+        with st.spinner("Converting DWG to DXF..."):
+            try:
+                dxf_path = FileConverter.convert_dwg_to_dxf(tmp_path)
+                tmp_path = dxf_path  # Use converted DXF from here on
+                dwg_converted = True
+                st.success(f"✅ Converted **{drawing_file.name}** to DXF successfully.")
+            except RuntimeError as e:
+                st.error(
+                    f"⚠️ Could not convert DWG file automatically.\n\n"
+                    f"**What to do:** Open the DWG in AutoCAD or BricsCAD → File → Save As → DXF, "
+                    f"then upload the DXF version.\n\n"
+                    f"_Technical detail: {str(e)}_"
+                )
+                st.stop()
+
+    # ─── Step 0: Quick Scan + Full Analysis Tabs ──────────────────────────────
+    tab_scan, tab_analysis = st.tabs(["Step 0: Quick Scan", "Full Analysis"])
+
+    # ═══ TAB 1: QUICK SCAN ═══════════════════════════════════════════════════
+    with tab_scan:
+        st.markdown("### Step 0 — Compatibility Scan")
+        st.caption("Quick check: how much of this drawing does TraceQ recognise?")
+
+        with st.spinner("Running quick scan..."):
+            try:
+                engine = TraceQEngine()
+                scan = engine.quick_scan(tmp_path)
+            except Exception as e:
+                st.error(f"Quick scan failed: {str(e)}")
+                scan = None
+
+        if scan and scan._dwg_unsupported:
+            st.error(scan.verdict_msg)
+        elif scan:
+            # ── Overall Score ──
+            if scan.verdict == 'HIGH':
+                score_color = "🟢"
+                st.success(f"{score_color} **Overall Compatibility: {scan.overall_score}% — HIGH**")
+                st.info(scan.verdict_msg)
+            elif scan.verdict == 'MEDIUM':
+                score_color = "🟡"
+                st.warning(f"{score_color} **Overall Compatibility: {scan.overall_score}% — MEDIUM**")
+                st.info(scan.verdict_msg)
+            else:
+                score_color = "🔴"
+                st.error(f"{score_color} **Overall Compatibility: {scan.overall_score}% — LOW**")
+                st.info(scan.verdict_msg)
+
+            # ── Score Breakdown ──
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Layers", f"{scan.layer_score}%",
+                          delta=f"{len(scan.recognised_layers)}/{scan.hvac_candidate_layers}")
+            with col2:
+                st.metric("Blocks", f"{scan.block_score}%",
+                          delta=f"{len(scan.recognised_blocks)}/{scan.total_blocks}")
+            with col3:
+                st.metric("Text Patterns", f"{scan.mtext_score}%",
+                          delta=f"{scan.mtext_pattern_hits}/{scan.total_mtext_patterns}")
+            with col4:
+                st.metric("Total Entities", f"{scan.total_entities:,}")
+
+            st.markdown("---")
+
+            # ── Recognised Layers ──
+            if scan.recognised_layers:
+                with st.expander(f"✅ Recognised Layers ({len(scan.recognised_layers)})", expanded=True):
+                    layer_data = []
+                    for rl in scan.recognised_layers:
+                        layer_data.append({
+                            "Layer Name": rl['layer'],
+                            "Equipment Type": rl['equipment_type'].replace('_', ' ').title(),
+                            "Confidence": f"{rl['confidence']:.0%}",
+                            "Match": rl['method'],
+                        })
+                    st.dataframe(layer_data, use_container_width=True, hide_index=True)
+
+            # ── Unrecognised Layers ──
+            if scan.unrecognised_layers:
+                with st.expander(f"❓ Unrecognised Layers ({len(scan.unrecognised_layers)})", expanded=False):
+                    st.caption("These layers may contain equipment that TraceQ doesn't recognise yet. Nestor can help identify them.")
+                    for ul in scan.unrecognised_layers:
+                        st.text(f"  {ul}")
+
+            # ── Recognised Blocks ──
+            if scan.recognised_blocks:
+                with st.expander(f"✅ Recognised Blocks ({len(scan.recognised_blocks)})", expanded=True):
+                    block_data = []
+                    for rb in scan.recognised_blocks:
+                        block_data.append({
+                            "Block Name": rb['block'],
+                            "Equipment Type": rb['equipment_type'].replace('_', ' ').title(),
+                            "Count": rb['count'],
+                            "Match": rb['match'],
+                        })
+                    st.dataframe(block_data, use_container_width=True, hide_index=True)
+
+            # ── Unrecognised Blocks ──
+            if scan.unrecognised_blocks:
+                with st.expander(f"❓ Unrecognised Blocks ({len(scan.unrecognised_blocks)})", expanded=False):
+                    st.caption("These blocks may be equipment. Nestor can identify them to expand the dictionary.")
+                    block_unk = []
+                    for ub in scan.unrecognised_blocks:
+                        block_unk.append({
+                            "Block Name": ub['block'],
+                            "Occurrences": ub['count'],
+                        })
+                    st.dataframe(block_unk, use_container_width=True, hide_index=True)
+
+            st.markdown("---")
+            st.caption("Tip: After running the full analysis, send unrecognised items to Nestor for identification. His corrections will permanently improve TraceQ's accuracy.")
+
+    # ═══ TAB 2: FULL ANALYSIS ════════════════════════════════════════════════
+    with tab_analysis:
+        with st.spinner("Analysing drawing... this may take a moment."):
+            try:
+                engine = TraceQEngine()
+                result = engine.analyze(tmp_path)
+            except Exception as e:
+                st.error(f"Analysis failed: {str(e)}")
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                st.stop()
 
         try:
-            engine = TraceQEngine()
-            result = engine.analyze(tmp_path)
             os.unlink(tmp_path)
-        except Exception as e:
-            os.unlink(tmp_path)
-            st.error(f"Analysis failed: {str(e)}")
-            st.stop()
+        except OSError:
+            pass
 
-    # ─── Results Header ───────────────────────────────────────────────────────
-    st.success(f"✅ Analysis complete — **{drawing_file.name}**")
-    st.markdown("---")
+        # ─── Results Header ───────────────────────────────────────────────────────
+        st.success(f"✅ Analysis complete — **{drawing_file.name}**")
+        st.markdown("---")
 
-    # ─── Key Metrics ──────────────────────────────────────────────────────────
-    merged = result.detection_results.get('merged', {})
-    total_items = sum(v.get('count', 0) for v in merged.values())
-    total_categories = len(merged)
-    parser_info = result.parse_info
+        # ─── Key Metrics ──────────────────────────────────────────────────────────
+        merged = result.detection_results.get('merged', {})
+        total_items = sum(v.get('count', 0) for v in merged.values())
+        total_categories = len(merged)
+        parser_info = result.parse_info
 
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Total Equipment", f"{total_items:,}")
-    with col2:
-        st.metric("Categories Found", total_categories)
-    with col3:
-        st.metric("Layers Scanned", parser_info.get('layers', 0))
-    with col4:
-        st.metric("Block Types", parser_info.get('block_types', 0))
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Equipment", f"{total_items:,}")
+        with col2:
+            st.metric("Categories Found", total_categories)
+        with col3:
+            st.metric("Layers Scanned", parser_info.get('layers', 0))
+        with col4:
+            st.metric("Block Types", parser_info.get('block_types', 0))
 
-    st.markdown("---")
+        st.markdown("---")
 
-    # ─── Equipment Inventory ──────────────────────────────────────────────────
-    st.markdown("### 📋 Equipment Inventory")
+        # ─── Equipment Inventory ──────────────────────────────────────────────────
+        st.markdown("### 📋 Equipment Inventory")
 
-    table_data = []
-    for equip_type, data in sorted(merged.items()):
-        count = data.get('count', 0)
-        source = data.get('source', 'unknown')
-        confidence = data.get('confidence', 0)
-        alt = data.get('alternate_counts', {})
+        table_data = []
+        for equip_type, data in sorted(merged.items()):
+            count = data.get('count', 0)
+            source = data.get('source', 'unknown')
+            confidence = data.get('confidence', 0)
+            alt = data.get('alternate_counts', {})
 
-        if 'tier1' in source:
-            source_label = "Layer"
-            tier_icon = "🟢"
-        elif 'tier2' in source:
-            source_label = "Block"
-            tier_icon = "🔵"
-        elif 'tier3' in source:
-            source_label = "Text"
-            tier_icon = "🟡"
-        else:
-            source_label = source
-            tier_icon = "⚪"
+            if 'tier1' in source:
+                source_label = "Layer"
+                tier_icon = "🟢"
+            elif 'tier2' in source:
+                source_label = "Block"
+                tier_icon = "🔵"
+            elif 'tier3' in source:
+                source_label = "Text"
+                tier_icon = "🟡"
+            else:
+                source_label = source
+                tier_icon = "⚪"
 
-        name = _format_equipment_name(equip_type)
+            name = _format_equipment_name(equip_type)
 
-        alts = []
-        for k, v in alt.items():
-            if v > 0 and v != count:
-                alts.append(f"{k}: {v}")
-        alt_str = ", ".join(alts) if alts else "—"
+            alts = []
+            for k, v in alt.items():
+                if v > 0 and v != count:
+                    alts.append(f"{k}: {v}")
+            alt_str = ", ".join(alts) if alts else "—"
 
-        table_data.append({
-            "Equipment": name,
-            "Count": count,
-            "Detection": f"{tier_icon} {source_label}",
-            "Confidence": f"{int(confidence * 100)}%",
-            "Other Counts": alt_str,
-        })
+            table_data.append({
+                "Equipment": name,
+                "Count": count,
+                "Detection": f"{tier_icon} {source_label}",
+                "Confidence": f"{int(confidence * 100)}%",
+                "Other Counts": alt_str,
+            })
 
-    if table_data:
-        st.dataframe(
-            table_data,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Equipment": st.column_config.TextColumn("Equipment", width="medium"),
-                "Count": st.column_config.NumberColumn("Count", width="small"),
-                "Detection": st.column_config.TextColumn("Detection Method", width="small"),
-                "Confidence": st.column_config.TextColumn("Confidence", width="small"),
-                "Other Counts": st.column_config.TextColumn("Alternate Counts", width="medium"),
-            }
-        )
+        if table_data:
+            st.dataframe(
+                table_data,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Equipment": st.column_config.TextColumn("Equipment", width="medium"),
+                    "Count": st.column_config.NumberColumn("Count", width="small"),
+                    "Detection": st.column_config.TextColumn("Detection Method", width="small"),
+                    "Confidence": st.column_config.TextColumn("Confidence", width="small"),
+                    "Other Counts": st.column_config.TextColumn("Alternate Counts", width="medium"),
+                }
+            )
 
-    st.markdown("---")
+        st.markdown("---")
 
-    # ─── BOQ Comparison (if BOQ uploaded) ─────────────────────────────────────
-    if boq_file is not None:
-        st.markdown("### 📊 BOQ Discrepancy Report")
+        # ─── BOQ Comparison (if BOQ uploaded) ─────────────────────────────────────
+        if boq_file is not None:
+            st.markdown("### 📊 BOQ Discrepancy Report")
 
-        try:
-            boq_bytes = boq_file.read()
-            boq_items = parse_boq(boq_bytes, boq_file.name)
+            try:
+                boq_bytes = boq_file.read()
+                boq_items = parse_boq(boq_bytes, boq_file.name)
 
-            if boq_items:
-                comparisons, missing_from_boq = compare_boq_vs_drawing(boq_items, merged)
+                if boq_items:
+                    comparisons, missing_from_boq = compare_boq_vs_drawing(boq_items, merged)
 
-                # ── Summary Metrics ──
-                matches = sum(1 for c in comparisons if c['Risk'] == 'MATCH')
-                discrepancies = sum(1 for c in comparisons if c['Risk'] in ('HIGH', 'MEDIUM', 'LOW'))
-                verify_items = sum(1 for c in comparisons if c['Risk'] == 'VERIFY')
-                missing_count = len(missing_from_boq)
-                total_exposure = sum(c.get('_exposure_num') or 0 for c in comparisons)
+                    # ── Summary Metrics ──
+                    matches = sum(1 for c in comparisons if c['Risk'] == 'MATCH')
+                    discrepancies = sum(1 for c in comparisons if c['Risk'] in ('HIGH', 'MEDIUM', 'LOW'))
+                    verify_items = sum(1 for c in comparisons if c['Risk'] == 'VERIFY')
+                    missing_count = len(missing_from_boq)
+                    total_exposure = sum(c.get('_exposure_num') or 0 for c in comparisons)
 
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("Matching", matches)
-                with col2:
-                    st.metric("Discrepancies", discrepancies)
-                with col3:
-                    st.metric("Needs Verification", verify_items)
-                with col4:
-                    st.metric("Total Exposure", f"AED {total_exposure:,.0f}")
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Matching", matches)
+                    with col2:
+                        st.metric("Discrepancies", discrepancies)
+                    with col3:
+                        st.metric("Needs Verification", verify_items)
+                    with col4:
+                        st.metric("Total Exposure", f"AED {total_exposure:,.0f}")
 
-                # ── EXCEL DOWNLOAD — top of report ──
-                excel_bytes = generate_excel_report(
-                    comparisons, missing_from_boq, boq_items,
-                    drawing_file.name, boq_file.name,
-                )
-                report_filename = f"TraceQ_BOQ_Report_{drawing_file.name.split('.')[0]}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+                    # ── EXCEL DOWNLOAD — top of report ──
+                    excel_bytes = generate_excel_report(
+                        comparisons, missing_from_boq, boq_items,
+                        drawing_file.name, boq_file.name,
+                    )
+                    report_filename = f"TraceQ_BOQ_Report_{drawing_file.name.split('.')[0]}_{datetime.now().strftime('%Y%m%d')}.xlsx"
 
-                st.download_button(
-                    label="📥 Download BOQ Discrepancy Report (Excel)",
-                    data=excel_bytes,
-                    file_name=report_filename,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    type="primary",
-                )
+                    st.download_button(
+                        label="📥 Download BOQ Discrepancy Report (Excel)",
+                        data=excel_bytes,
+                        file_name=report_filename,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        type="primary",
+                    )
 
-                st.markdown("---")
+                    st.markdown("---")
 
-                # ── Main Comparison Table ──
-                st.markdown("#### Comparison Details")
+                    # ── Main Comparison Table ──
+                    st.markdown("#### Comparison Details")
 
-                display_comparisons = []
-                for c in comparisons:
-                    display_comparisons.append({
-                        'Trace ID': c['Trace ID'],
-                        'Equipment': c['Equipment'],
-                        'BOQ Qty': c['BOQ Qty'],
-                        'Drawing Qty': c['Drawing Qty'],
-                        'Diff': c['Difference'],
-                        'Unit': c['Unit'],
-                        'Risk': c['Risk'],
-                        'Exposure (AED)': c['Exposure (AED)'],
-                        'Notes': c['Notes'],
-                    })
-
-                st.dataframe(
-                    display_comparisons,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "Trace ID": st.column_config.TextColumn("Trace ID", width="small"),
-                        "Equipment": st.column_config.TextColumn("Equipment", width="medium"),
-                        "BOQ Qty": st.column_config.TextColumn("BOQ", width="small"),
-                        "Drawing Qty": st.column_config.TextColumn("Drawing", width="small"),
-                        "Diff": st.column_config.TextColumn("Diff", width="small"),
-                        "Unit": st.column_config.TextColumn("Unit", width="small"),
-                        "Risk": st.column_config.TextColumn("Risk", width="small"),
-                        "Exposure (AED)": st.column_config.TextColumn("Exposure", width="small"),
-                        "Notes": st.column_config.TextColumn("Notes", width="large"),
-                    }
-                )
-
-                # ── Missing from BOQ ──
-                if missing_from_boq:
-                    st.markdown(f"#### Items in Drawing Not in BOQ ({missing_count} items)")
-                    st.caption("These items were detected in the drawing but have no corresponding BOQ line item.")
-
-                    missing_display = []
-                    for m in missing_from_boq:
-                        missing_display.append({
-                            'Trace ID': m['Trace ID'],
-                            'Equipment': m['Equipment'],
-                            'Drawing Qty': m['Drawing Qty'],
-                            'Detection': m['Detection'],
-                            'Confidence': m['Confidence'],
-                            'Notes': m['Notes'],
+                    display_comparisons = []
+                    for c in comparisons:
+                        display_comparisons.append({
+                            'Trace ID': c['Trace ID'],
+                            'Equipment': c['Equipment'],
+                            'BOQ Qty': c['BOQ Qty'],
+                            'Drawing Qty': c['Drawing Qty'],
+                            'Diff': c['Difference'],
+                            'Unit': c['Unit'],
+                            'Risk': c['Risk'],
+                            'Exposure (AED)': c['Exposure (AED)'],
+                            'Notes': c['Notes'],
                         })
 
                     st.dataframe(
-                        missing_display,
+                        display_comparisons,
                         use_container_width=True,
                         hide_index=True,
                         column_config={
                             "Trace ID": st.column_config.TextColumn("Trace ID", width="small"),
                             "Equipment": st.column_config.TextColumn("Equipment", width="medium"),
-                            "Drawing Qty": st.column_config.NumberColumn("Qty", width="small"),
-                            "Detection": st.column_config.TextColumn("Detection", width="medium"),
-                            "Confidence": st.column_config.TextColumn("Confidence", width="small"),
+                            "BOQ Qty": st.column_config.TextColumn("BOQ", width="small"),
+                            "Drawing Qty": st.column_config.TextColumn("Drawing", width="small"),
+                            "Diff": st.column_config.TextColumn("Diff", width="small"),
+                            "Unit": st.column_config.TextColumn("Unit", width="small"),
+                            "Risk": st.column_config.TextColumn("Risk", width="small"),
+                            "Exposure (AED)": st.column_config.TextColumn("Exposure", width="small"),
                             "Notes": st.column_config.TextColumn("Notes", width="large"),
                         }
                     )
 
-                # ── Parsed BOQ Line Items (detail expander) ──
-                with st.expander("📄 Parsed BOQ Line Items", expanded=False):
-                    boq_display = []
-                    for item in boq_items:
-                        boq_display.append({
-                            "Ref": item.get('boq_ref', '—'),
-                            "Description": item['description'][:70],
-                            "Type": (item['equipment_type'] or '—').replace('_', ' ').title(),
-                            "Unit": item.get('unit', '—'),
-                            "Qty": int(item['qty']) if item['qty'] == int(item['qty']) else item['qty'],
-                            "Rate": f"{item['rate']:,.0f}" if item.get('rate') else '—',
-                            "Total": f"{item['total']:,.0f}" if item.get('total') else '—',
-                        })
-                    st.dataframe(boq_display, use_container_width=True, hide_index=True)
-            else:
-                st.warning("Could not parse any equipment items from the BOQ file. Check the format.")
+                    # ── Missing from BOQ ──
+                    if missing_from_boq:
+                        st.markdown(f"#### Items in Drawing Not in BOQ ({missing_count} items)")
+                        st.caption("These items were detected in the drawing but have no corresponding BOQ line item.")
 
-        except Exception as e:
-            st.error(f"Error reading BOQ file: {str(e)}")
+                        missing_display = []
+                        for m in missing_from_boq:
+                            missing_display.append({
+                                'Trace ID': m['Trace ID'],
+                                'Equipment': m['Equipment'],
+                                'Drawing Qty': m['Drawing Qty'],
+                                'Detection': m['Detection'],
+                                'Confidence': m['Confidence'],
+                                'Notes': m['Notes'],
+                            })
+
+                        st.dataframe(
+                            missing_display,
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                "Trace ID": st.column_config.TextColumn("Trace ID", width="small"),
+                                "Equipment": st.column_config.TextColumn("Equipment", width="medium"),
+                                "Drawing Qty": st.column_config.NumberColumn("Qty", width="small"),
+                                "Detection": st.column_config.TextColumn("Detection", width="medium"),
+                                "Confidence": st.column_config.TextColumn("Confidence", width="small"),
+                                "Notes": st.column_config.TextColumn("Notes", width="large"),
+                            }
+                        )
+
+                    # ── Parsed BOQ Line Items (detail expander) ──
+                    with st.expander("📄 Parsed BOQ Line Items", expanded=False):
+                        boq_display = []
+                        for item in boq_items:
+                            boq_display.append({
+                                "Ref": item.get('boq_ref', '—'),
+                                "Description": item['description'][:70],
+                                "Type": (item['equipment_type'] or '—').replace('_', ' ').title(),
+                                "Unit": item.get('unit', '—'),
+                                "Qty": int(item['qty']) if item['qty'] == int(item['qty']) else item['qty'],
+                                "Rate": f"{item['rate']:,.0f}" if item.get('rate') else '—',
+                                "Total": f"{item['total']:,.0f}" if item.get('total') else '—',
+                            })
+                        st.dataframe(boq_display, use_container_width=True, hide_index=True)
+                else:
+                    st.warning("Could not parse any equipment items from the BOQ file. Check the format.")
+
+            except Exception as e:
+                st.error(f"Error reading BOQ file: {str(e)}")
+
+            st.markdown("---")
+
+        # ─── Validation Results ───────────────────────────────────────────────────
+        st.markdown("### ⚠️ Validation Checks")
+
+        validation = result.validation_results
+        warnings = validation.get('warnings', [])
+
+        if not warnings:
+            st.success("All validation checks passed — no warnings.")
+        else:
+            for w in warnings:
+                if isinstance(w, dict):
+                    severity = w.get('severity', 'info')
+                    msg = w.get('message', str(w))
+                    if severity == 'warning':
+                        st.warning(msg)
+                    elif severity == 'critical':
+                        st.error(msg)
+                    else:
+                        st.info(msg)
+                else:
+                    w_str = str(w)
+                    if w_str.startswith('[WARNING]'):
+                        st.warning(w_str)
+                    elif w_str.startswith('[CRITICAL]'):
+                        st.error(w_str)
+                    else:
+                        st.info(w_str)
 
         st.markdown("---")
 
-    # ─── Validation Results ───────────────────────────────────────────────────
-    st.markdown("### ⚠️ Validation Checks")
+        # ─── Layer Classification ─────────────────────────────────────────────────
+        with st.expander("🗂️ Layer Classification Details", expanded=False):
+            layer_results = result.layer_classification
+            classified = []
+            unclassified = []
 
-    validation = result.validation_results
-    warnings = validation.get('warnings', [])
+            for layer_name, info in sorted(layer_results.items()):
+                equip = info.get('equipment_type')
+                conf = info.get('confidence', 0)
+                method = info.get('method', 'unknown')
 
-    if not warnings:
-        st.success("All validation checks passed — no warnings.")
-    else:
-        for w in warnings:
-            if isinstance(w, dict):
-                severity = w.get('severity', 'info')
-                msg = w.get('message', str(w))
-                if severity == 'warning':
-                    st.warning(msg)
-                elif severity == 'critical':
-                    st.error(msg)
-                else:
-                    st.info(msg)
-            else:
-                w_str = str(w)
-                if w_str.startswith('[WARNING]'):
-                    st.warning(w_str)
-                elif w_str.startswith('[CRITICAL]'):
-                    st.error(w_str)
-                else:
-                    st.info(w_str)
-
-    st.markdown("---")
-
-    # ─── Layer Classification ─────────────────────────────────────────────────
-    with st.expander("🗂️ Layer Classification Details", expanded=False):
-        layer_results = result.layer_classification
-        classified = []
-        unclassified = []
-
-        for layer_name, info in sorted(layer_results.items()):
-            equip = info.get('equipment_type')
-            conf = info.get('confidence', 0)
-            method = info.get('method', 'unknown')
-
-            if equip:
-                classified.append({
-                    "Layer": layer_name,
-                    "Equipment Type": equip.replace('_', ' ').title(),
-                    "Confidence": f"{int(conf * 100)}%",
-                    "Match": method,
-                })
-            else:
-                unclassified.append(layer_name)
-
-        if classified:
-            st.markdown("**Classified Layers:**")
-            st.dataframe(classified, use_container_width=True, hide_index=True)
-
-        if unclassified:
-            st.markdown(f"**Unclassified Layers ({len(unclassified)}):**")
-            st.text(", ".join(unclassified))
-
-    # ─── Detection Tier Breakdown ─────────────────────────────────────────────
-    with st.expander("📊 Detection Tier Breakdown", expanded=False):
-        for tier_name in ['tier1', 'tier2', 'tier3']:
-            tier_data = result.detection_results.get(tier_name, {})
-            if tier_data:
-                labels = {'tier1': '🟢 Tier 1 — Layer Detection',
-                          'tier2': '🔵 Tier 2 — Block Detection',
-                          'tier3': '🟡 Tier 3 — Text Detection'}
-                st.markdown(f"**{labels[tier_name]}**")
-                tier_items = []
-                for equip, data in sorted(tier_data.items()):
-                    tier_items.append({
-                        "Equipment": equip.replace('_', ' ').title(),
-                        "Count": data.get('count', 0),
+                if equip:
+                    classified.append({
+                        "Layer": layer_name,
+                        "Equipment Type": equip.replace('_', ' ').title(),
+                        "Confidence": f"{int(conf * 100)}%",
+                        "Match": method,
                     })
-                st.dataframe(tier_items, use_container_width=True, hide_index=True)
+                else:
+                    unclassified.append(layer_name)
 
-    # ─── Raw JSON Output ──────────────────────────────────────────────────────
-    with st.expander("🔧 Raw JSON Output", expanded=False):
-        st.json(result.to_dict())
+            if classified:
+                st.markdown("**Classified Layers:**")
+                st.dataframe(classified, use_container_width=True, hide_index=True)
 
-    # ─── Download Button (JSON fallback — always available) ───────────────────
-    st.markdown("---")
-    json_output = json.dumps(result.to_dict(), indent=2)
-    st.download_button(
-        label="📥 Download Full Analysis (JSON)",
-        data=json_output,
-        file_name=f"TraceQ_Analysis_{drawing_file.name}_{datetime.now().strftime('%Y%m%d')}.json",
-        mime="application/json",
-    )
+            if unclassified:
+                st.markdown(f"**Unclassified Layers ({len(unclassified)}):**")
+                st.text(", ".join(unclassified))
+
+        # ─── Detection Tier Breakdown ─────────────────────────────────────────────
+        with st.expander("📊 Detection Tier Breakdown", expanded=False):
+            for tier_name in ['tier1', 'tier2', 'tier3']:
+                tier_data = result.detection_results.get(tier_name, {})
+                if tier_data:
+                    labels = {'tier1': '🟢 Tier 1 — Layer Detection',
+                              'tier2': '🔵 Tier 2 — Block Detection',
+                              'tier3': '🟡 Tier 3 — Text Detection'}
+                    st.markdown(f"**{labels[tier_name]}**")
+                    tier_items = []
+                    for equip, data in sorted(tier_data.items()):
+                        tier_items.append({
+                            "Equipment": equip.replace('_', ' ').title(),
+                            "Count": data.get('count', 0),
+                        })
+                    st.dataframe(tier_items, use_container_width=True, hide_index=True)
+
+        # ─── Raw JSON Output ──────────────────────────────────────────────────────
+        with st.expander("🔧 Raw JSON Output", expanded=False):
+            st.json(result.to_dict())
+
+        # ─── Download Button (JSON fallback — always available) ───────────────────
+        st.markdown("---")
+        json_output = json.dumps(result.to_dict(), indent=2)
+        st.download_button(
+            label="📥 Download Full Analysis (JSON)",
+            data=json_output,
+            file_name=f"TraceQ_Analysis_{drawing_file.name}_{datetime.now().strftime('%Y%m%d')}.json",
+            mime="application/json",
+        )
