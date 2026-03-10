@@ -174,21 +174,34 @@
       "notes": "Count occurrences of FCU labels. In S5: FCU-01 (88x), FCU-02 (40x), FCU-03 (24x), FCU-4 (4x) = 156 total. BOQ target 170."
     },
     "vrf": {
-      "patterns": ["VRF-[A-Z0-9]+-[A-Z0-9]+", "VRV-[A-Z0-9]+-[A-Z0-9]+", "VRV-\\d+"],
-      "count_method": "count_unique_labels",
-      "confidence": 0.6
+      "patterns": ["VRF-[A-Z0-9]+-[A-Z0-9]+", "VRV-[A-Z0-9]+-[A-Z0-9]+", "VRV-\\d+", "VRF-\\d+"],
+      "count_method": "count_occurrences",
+      "confidence": 0.6,
+      "notes": "Changed to count_occurrences: each VRV/VRF label on drawing represents one physical unit/module. VRV-1 appearing 5 times = 5 modules of that system."
     },
     "flow_bar": {
-      "patterns": ["FLOW BAR", "S/R FLOW BAR", "FLOW BAR.*RECESSED"],
+      "patterns": ["FLOW\\s*BAR", "S/?R\\s*FLOW\\s*BAR", "FLOW\\s*BAR.*RECESSED", "FB-?\\d+", "\\bFB\\b"],
       "count_method": "count_occurrences",
       "confidence": 0.5,
-      "notes": "Per Nestor: can be polylines, blocks, or annotations. No reliable block-based count."
+      "notes": "Per Nestor: can be polylines, blocks, or annotations. Patterns expanded to catch FB abbreviations and various spacing. If count still low, flow bars may be drawn as polylines without text labels."
     },
     "plenum_box": {
       "patterns": ["PLENUM BOX", "PLENUM\\s+BOX.*SIZE"],
       "count_method": "count_occurrences",
       "confidence": 0.4,
       "notes": "Per Nestor: can be polylines, blocks, or annotations."
+    },
+    "extract_diffuser": {
+      "patterns": ["\\bEAD\\b", "\\bE\\.?A\\.?D\\b", "EXTRACT AIR DIFF", "EXTRACT.*DIFF"],
+      "count_method": "count_occurrences",
+      "confidence": 0.6,
+      "notes": "EAD = Extract Air Diffuser. Per Nestor: under AC system, these are often Return Air Diffusers (RADs). Flagged for QS review."
+    },
+    "volume_control_damper": {
+      "patterns": ["\\bVCD\\b", "\\bSVD\\b", "VOLUME.*DAMPER", "VOL.*CTRL.*DAMPER"],
+      "count_method": "count_occurrences",
+      "confidence": 0.55,
+      "notes": "Catches VCD text labels on drawings. Rectangular VCDs may only appear as text labels (e.g., VCD 250x250) without dedicated blocks."
     },
     "flexible_duct": {
       "patterns": ["FLEXIBLE DUCT", "FLEX.*DUCT", "FLEX.*\\d+\\s*DIA"],

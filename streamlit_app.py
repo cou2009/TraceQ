@@ -415,12 +415,13 @@ def _xl_val(v):
     return '—' if v is None else v
 
 
-def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name, boq_name):
+def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name, boq_name, merged=None, dedup_report=None):
     """
-    Generate a professional Excel BOQ Discrepancy Report with 3 tabs:
+    Generate a professional Excel BOQ Discrepancy Report with 4 tabs:
       Tab 1: Executive Summary
       Tab 2: Discrepancy Details
       Tab 3: Items Not in BOQ
+      Tab 4: Detection Audit (three-tier counts, review flags, dedup)
     Returns bytes of the .xlsx file.
     """
     wb = openpyxl.Workbook()
@@ -658,6 +659,91 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
     not_in_boq_widths = [12, 28, 14, 20, 12, 60]
     for i, w in enumerate(not_in_boq_widths):
         ws3.column_dimensions[get_column_letter(i + 1)].width = w
+
+    # ─── Tab 4: Detection Audit ──────────────────────────────────────────────
+    if merged:
+        ws4 = wb.create_sheet("Detection Audit")
+        ws4.sheet_properties.tabColor = "0066CC"
+
+        ws4['A1'] = 'Detection Tier Audit — Three-Tier Breakdown'
+        ws4['A1'].font = title_font
+        ws4.merge_cells('A1:H1')
+        ws4['A2'] = 'Shows what each detection tier found. Review flags indicate significant disagreements requiring QS verification.'
+        ws4['A2'].font = subtitle_font
+        ws4.merge_cells('A2:H2')
+
+        review_fill = PatternFill('solid', fgColor='FFF3CD')
+
+        headers4 = ['Equipment', 'Final Count', 'Source', 'Confidence', 'Layer (T1)', 'Block (T2)', 'Text (T3)', 'Status']
+        row = 4
+        for col_idx, h in enumerate(headers4, 1):
+            c = ws4.cell(row=row, column=col_idx, value=h)
+            c.font = header_font
+            c.fill = header_fill
+            c.alignment = Alignment(horizontal='center')
+            c.border = thin_border
+        row += 1
+
+        for equip_type in sorted(merged.keys()):
+            data = merged[equip_type]
+            alt = data.get('alternate_counts', {})
+            source = data.get('source', '')
+            if 'tier1' in source:
+                src_label = 'Layer'
+            elif 'tier2' in source:
+                src_label = 'Block'
+            elif 'tier3' in source:
+                src_label = 'Text'
+            else:
+                src_label = source
+
+            flagged = data.get('needs_review', False)
+            t1 = alt.get('tier1', 0)
+            t2 = alt.get('tier2', 0)
+            t3 = alt.get('tier3', 0)
+
+            vals = [
+                _format_equipment_name(equip_type),
+                data.get('count', 0),
+                src_label,
+                f"{int(data.get('confidence', 0) * 100)}%",
+                t1 if t1 > 0 else '—',
+                t2 if t2 > 0 else '—',
+                t3 if t3 > 0 else '—',
+                'REVIEW' if flagged else 'OK',
+            ]
+            for col_idx, v in enumerate(vals, 1):
+                c = ws4.cell(row=row, column=col_idx, value=v)
+                c.font = normal_font
+                c.border = thin_border
+                if flagged:
+                    c.fill = review_fill
+                if col_idx in (2, 5, 6, 7) and isinstance(v, (int, float)):
+                    c.number_format = '#,##0'
+                c.alignment = Alignment(horizontal='center') if col_idx != 1 else Alignment(horizontal='left')
+            row += 1
+
+        # Dedup section
+        if dedup_report:
+            adjustments = dedup_report.get('adjustments', [])
+            if adjustments:
+                row += 1
+                ws4.cell(row=row, column=1, value='PROXIMITY DEDUPLICATION').font = bold_font_big
+                ws4.cell(row=row, column=1).fill = section_fill
+                for ci in range(1, 9):
+                    ws4.cell(row=row, column=ci).fill = section_fill
+                row += 1
+                ws4.cell(row=row, column=1, value=f"Radius: {dedup_report.get('radius_used', 0):.0f} units").font = normal_font
+                row += 1
+                for adj in adjustments:
+                    ws4.cell(row=row, column=1, value=_format_equipment_name(adj.get('equipment_type', ''))).font = normal_font
+                    ws4.cell(row=row, column=2, value=f"T3: {adj.get('tier3_original', 0)} → {adj.get('tier3_adjusted', 0)}").font = normal_font
+                    ws4.cell(row=row, column=3, value=f"-{adj.get('shadowed_by_blocks', 0)} shadowed").font = normal_font
+                    row += 1
+
+        audit_widths = [28, 14, 12, 12, 14, 14, 14, 12]
+        for i, w in enumerate(audit_widths):
+            ws4.column_dimensions[get_column_letter(i + 1)].width = w
 
     # Save to bytes
     output = io.BytesIO()
@@ -1064,6 +1150,8 @@ else:
                     excel_bytes = generate_excel_report(
                         comparisons, missing_from_boq, boq_items,
                         drawing_file.name, boq_file.name,
+                        merged=merged,
+                        dedup_report=result.detection_results.get('dedup_report'),
                     )
                     report_filename = f"TraceQ_BOQ_Report_{drawing_file.name.split('.')[0]}_{datetime.now().strftime('%Y%m%d')}.xlsx"
 
