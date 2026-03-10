@@ -939,40 +939,51 @@ else:
         st.markdown("### 📋 Equipment Inventory")
 
         table_data = []
+        review_items = []
         for equip_type, data in sorted(merged.items()):
             count = data.get('count', 0)
             source = data.get('source', 'unknown')
             confidence = data.get('confidence', 0)
             alt = data.get('alternate_counts', {})
+            flagged = data.get('needs_review', False)
 
             if 'tier1' in source:
-                source_label = "Layer"
-                tier_icon = "🟢"
+                source_label = "🟢 Layer"
             elif 'tier2' in source:
-                source_label = "Block"
-                tier_icon = "🔵"
+                source_label = "🔵 Block"
             elif 'tier3' in source:
-                source_label = "Text"
-                tier_icon = "🟡"
+                source_label = "🟡 Text"
             else:
-                source_label = source
-                tier_icon = "⚪"
+                source_label = f"⚪ {source}"
 
             name = _format_equipment_name(equip_type)
 
-            alts = []
-            for k, v in alt.items():
-                if v > 0 and v != count:
-                    alts.append(f"{k}: {v}")
-            alt_str = ", ".join(alts) if alts else "—"
+            # Show all three tier counts explicitly
+            t1 = alt.get('tier1', 0)
+            t2 = alt.get('tier2', 0)
+            t3 = alt.get('tier3', 0)
 
-            table_data.append({
+            row = {
                 "Equipment": name,
                 "Count": count,
-                "Detection": f"{tier_icon} {source_label}",
+                "Source": source_label,
                 "Confidence": f"{int(confidence * 100)}%",
-                "Other Counts": alt_str,
-            })
+                "Layer": t1 if t1 > 0 else "—",
+                "Block": t2 if t2 > 0 else "—",
+                "Text": t3 if t3 > 0 else "—",
+            }
+
+            if flagged:
+                row["Flag"] = "⚠️ Review"
+                review_items.append({
+                    'name': name,
+                    'note': data.get('notes', 'Tier counts disagree significantly.'),
+                    'tier1': t1, 'tier2': t2, 'tier3': t3,
+                })
+            else:
+                row["Flag"] = "✅"
+
+            table_data.append(row)
 
         if table_data:
             st.dataframe(
@@ -982,11 +993,42 @@ else:
                 column_config={
                     "Equipment": st.column_config.TextColumn("Equipment", width="medium"),
                     "Count": st.column_config.NumberColumn("Count", width="small"),
-                    "Detection": st.column_config.TextColumn("Detection Method", width="small"),
-                    "Confidence": st.column_config.TextColumn("Confidence", width="small"),
-                    "Other Counts": st.column_config.TextColumn("Alternate Counts", width="medium"),
+                    "Source": st.column_config.TextColumn("Source", width="small"),
+                    "Confidence": st.column_config.TextColumn("Conf.", width="small"),
+                    "Layer": st.column_config.TextColumn("Layer (T1)", width="small"),
+                    "Block": st.column_config.TextColumn("Block (T2)", width="small"),
+                    "Text": st.column_config.TextColumn("Text (T3)", width="small"),
+                    "Flag": st.column_config.TextColumn("Status", width="small"),
                 }
             )
+
+        # Show review warnings if any
+        if review_items:
+            st.markdown("#### ⚠️ Items Flagged for QS Review")
+            for item in review_items:
+                st.warning(
+                    f"**{item['name']}** — Tier counts disagree: "
+                    f"Layer={item['tier1']}, Block={item['tier2']}, Text={item['tier3']}. "
+                    f"Recommend manual verification."
+                )
+
+        # Show dedup report if any proximity deductions were made
+        dedup_report = result.detection_results.get('dedup_report', {})
+        if dedup_report:
+            adjustments = dedup_report.get('adjustments', [])
+            if adjustments:
+                with st.expander(f"🔗 Proximity Deduplication ({len(adjustments)} adjustments)", expanded=False):
+                    st.caption(
+                        "Text labels found near block INSERTs of the same equipment type — "
+                        "Tier 3 count reduced to avoid double-counting."
+                    )
+                    for adj in adjustments:
+                        st.info(
+                            f"**{_format_equipment_name(adj.get('equipment_type', ''))}** — "
+                            f"Tier 3 reduced from {adj.get('tier3_original', 0)} to {adj.get('tier3_adjusted', 0)} "
+                            f"({adj.get('shadowed_by_blocks', 0)} text labels near blocks, "
+                            f"radius: {dedup_report.get('radius_used', 0):.0f} units)"
+                        )
 
         st.markdown("---")
 

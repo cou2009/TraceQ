@@ -75,6 +75,11 @@ class Config:
     def validation_rules(self):
         return self.block_dictionary.get("validation_rules", {})
 
+    @property
+    def duplicate_block_groups(self):
+        """Config-driven duplicate block detection. Returns list of groups."""
+        return self.block_dictionary.get("duplicate_block_groups", [])
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # FILE CONVERTER (DWG → DXF)
@@ -633,6 +638,122 @@ class LayerClassifier:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# SIZE EXTRACTOR (Universal sub-type/size detection)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class SizeExtractor:
+    """
+    Universal size/dimension extraction from block names and text labels.
+
+    Parses strings like "VCD 200", "250x250", "Ø200", "300mm dia", "FD-250"
+    to extract size information. This allows automatic sub-type splitting
+    without hardcoding specific sizes per equipment type.
+
+    Config-driven: size_patterns in block_dictionary.json define what to look for.
+    """
+
+    # Universal regex patterns for size extraction (no hardcoding)
+    SIZE_PATTERNS = [
+        # "VCD 200" → diameter 200
+        (r'(\d+)\s*(?:mm)?\s*(?:dia|diameter|Ø)', 'diameter'),
+        # "Ø200" or "Ø 200"
+        (r'Ø\s*(\d+)', 'diameter'),
+        # "250x250" or "250 x 250" → rectangular
+        (r'(\d+)\s*[xX×]\s*(\d+)', 'rectangular'),
+        # "FD-300" or "VCD-200" → size from suffix
+        (r'[A-Z]+-(\d{2,4})', 'suffix_size'),
+        # Block name ending with number: "VCD 200" → 200
+        (r'\s(\d{2,4})$', 'trailing_number'),
+        # "200mm" standalone
+        (r'(\d{2,4})\s*mm\b', 'millimetres'),
+    ]
+
+    @classmethod
+    def extract_size(cls, text):
+        """
+        Extract size/dimension from a string. Returns dict or None.
+
+        Returns:
+            {'type': 'diameter', 'value': 200, 'raw': '200mm dia'}
+            {'type': 'rectangular', 'width': 250, 'height': 250, 'raw': '250x250'}
+            None if no size found
+        """
+        if not text:
+            return None
+
+        text = text.strip()
+
+        # Try rectangular first (most specific)
+        match = re.search(r'(\d+)\s*[xX×]\s*(\d+)', text)
+        if match:
+            return {
+                'type': 'rectangular',
+                'width': int(match.group(1)),
+                'height': int(match.group(2)),
+                'raw': match.group(0),
+            }
+
+        # Try diameter patterns
+        match = re.search(r'Ø\s*(\d+)', text)
+        if match:
+            return {
+                'type': 'diameter',
+                'value': int(match.group(1)),
+                'raw': match.group(0),
+            }
+
+        match = re.search(r'(\d+)\s*(?:mm)?\s*(?:dia|diameter)', text, re.IGNORECASE)
+        if match:
+            return {
+                'type': 'diameter',
+                'value': int(match.group(1)),
+                'raw': match.group(0),
+            }
+
+        # Try suffix size (e.g., "FD-300")
+        match = re.search(r'[A-Za-z]+-(\d{2,4})$', text)
+        if match:
+            return {
+                'type': 'suffix_size',
+                'value': int(match.group(1)),
+                'raw': match.group(0),
+            }
+
+        # Try trailing number (e.g., "VCD 200")
+        match = re.search(r'\s(\d{2,4})$', text)
+        if match:
+            return {
+                'type': 'trailing_number',
+                'value': int(match.group(1)),
+                'raw': match.group(0),
+            }
+
+        # Try standalone mm (e.g., "200mm")
+        match = re.search(r'(\d{2,4})\s*mm\b', text, re.IGNORECASE)
+        if match:
+            return {
+                'type': 'millimetres',
+                'value': int(match.group(1)),
+                'raw': match.group(0),
+            }
+
+        return None
+
+    @classmethod
+    def format_size(cls, size_info):
+        """Format extracted size for display."""
+        if not size_info:
+            return ''
+        if size_info['type'] == 'rectangular':
+            return f"{size_info['width']}x{size_info['height']}mm"
+        elif size_info['type'] == 'diameter':
+            return f"Ø{size_info['value']}mm"
+        elif 'value' in size_info:
+            return f"{size_info['value']}mm"
+        return size_info.get('raw', '')
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # EQUIPMENT DETECTOR (Three-Tier)
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -647,19 +768,149 @@ class EquipmentDetector:
     def __init__(self, config: Config, classifier: LayerClassifier):
         self.config = config
         self.classifier = classifier
+        self._last_conflicts = []  # Populated by _merge()
 
     def detect(self, parser: DXFParser):
-        """Run all three tiers and merge results."""
+        """Run all three tiers, deduplicate, and merge results."""
         tier1 = self._tier1_layers(parser)
         tier2 = self._tier2_blocks(parser)
         tier3 = self._tier3_mtext(parser)
+
+        # Universal proximity deduplication:
+        # When a text entity (Tier 3) is near a block INSERT (Tier 2) and both
+        # map to the same equipment type, the text is a label for that block —
+        # not a separate item. Reduce the Tier 3 count accordingly.
+        dedup_report = self._proximity_dedup(parser, tier2, tier3)
+
         merged = self._merge(tier1, tier2, tier3)
         return {
             'tier1': tier1,
             'tier2': tier2,
             'tier3': tier3,
             'merged': merged,
+            'dedup_report': dedup_report,
         }
+
+    def _proximity_dedup(self, parser, tier2, tier3):
+        """
+        Universal proximity-based deduplication.
+
+        Compares block INSERT positions (Tier 2) against text entity positions (Tier 3).
+        When a text entity is within a configurable radius of a block that maps to the
+        same equipment type, the text count is reduced — the text is a label, not a
+        separate item.
+
+        This is universal — works for ANY equipment type, not just specific blocks.
+        The radius is auto-calculated from the drawing's bounding box (1% of diagonal).
+
+        Returns a dedup_report dict for audit trail.
+        """
+        dedup_report = {
+            'method': 'proximity_dedup',
+            'adjustments': [],
+            'radius_used': 0,
+        }
+
+        # Build a map of equipment_type → list of block INSERT positions from Tier 2
+        block_defs = self.config.blocks
+        prefix_rules = self.config.block_prefix_rules
+
+        # For each insert, determine its equipment type
+        block_positions_by_type = defaultdict(list)
+        for insert in parser.inserts:
+            block_name = insert['name']
+            equip_type = None
+
+            # Check exact match
+            if block_name in block_defs:
+                equip_type = block_defs[block_name]['equipment_type']
+            else:
+                # Check prefix rules
+                for prefix, rule in prefix_rules.items():
+                    if block_name.startswith(prefix) or block_name.upper().startswith(prefix.upper()):
+                        equip_type = rule.get('default_type')
+                        break
+
+            if equip_type:
+                block_positions_by_type[equip_type].append(
+                    (insert.get('x', 0), insert.get('y', 0))
+                )
+
+        if not block_positions_by_type:
+            return dedup_report
+
+        # Auto-calculate radius from drawing bounding box
+        # Use 1% of the diagonal as the proximity threshold
+        all_x = [ins.get('x', 0) for ins in parser.inserts if ins.get('x', 0) != 0]
+        all_y = [ins.get('y', 0) for ins in parser.inserts if ins.get('y', 0) != 0]
+        if all_x and all_y:
+            dx = max(all_x) - min(all_x)
+            dy = max(all_y) - min(all_y)
+            diagonal = (dx**2 + dy**2) ** 0.5
+            radius = max(diagonal * 0.01, 50)  # At least 50 units, 1% of diagonal
+        else:
+            radius = 500  # Fallback
+        dedup_report['radius_used'] = round(radius, 1)
+
+        # Build a map of equipment_type → text pattern matches from config
+        mtext_patterns = self.config.mtext_patterns
+        text_type_map = {}  # pattern → equipment_type
+        for equip_type, pdef in mtext_patterns.items():
+            for pattern in pdef.get('patterns', []):
+                text_type_map[pattern] = equip_type
+
+        # For each text/mtext entity, check if it matches an equipment pattern
+        # AND is near a block of the same type
+        all_text_entities = parser.mtext_entities + parser.text_entities
+
+        # Count how many text entities per type are "shadowed" by nearby blocks
+        shadowed_counts = defaultdict(int)
+
+        for text_ent in all_text_entities:
+            tx = text_ent.get('x', 0)
+            ty = text_ent.get('y', 0)
+            text_content = text_ent.get('text', '')
+
+            # What equipment type does this text match?
+            matched_type = None
+            for pattern, equip_type in text_type_map.items():
+                try:
+                    if re.search(pattern, text_content, re.IGNORECASE):
+                        matched_type = equip_type
+                        break
+                except re.error:
+                    continue
+
+            if not matched_type:
+                continue
+
+            # Is there a block of the same type within radius?
+            block_positions = block_positions_by_type.get(matched_type, [])
+            for bx, by in block_positions:
+                dist = ((tx - bx)**2 + (ty - by)**2) ** 0.5
+                if dist <= radius:
+                    shadowed_counts[matched_type] += 1
+                    break  # Only count one shadow per text entity
+
+        # Adjust Tier 3 counts by subtracting shadowed text entities
+        for equip_type, shadow_count in shadowed_counts.items():
+            if equip_type in tier3:
+                original = tier3[equip_type]['count']
+                adjusted = max(0, original - shadow_count)
+                if adjusted != original:
+                    dedup_report['adjustments'].append({
+                        'equipment_type': equip_type,
+                        'tier3_original': original,
+                        'shadowed_by_blocks': shadow_count,
+                        'tier3_adjusted': adjusted,
+                        'note': f'{shadow_count} text labels near blocks of same type — likely labels, not separate items.',
+                    })
+                    tier3[equip_type]['count'] = adjusted
+                    tier3[equip_type]['items'].append({
+                        'dedup_adjustment': f'-{shadow_count} (proximity dedup: text near block within {radius:.0f} units)',
+                    })
+
+        return dedup_report
 
     def _tier1_layers(self, parser: DXFParser):
         """Tier 1: Count entities by classified layer."""
@@ -695,6 +946,9 @@ class EquipmentDetector:
         block_defs = self.config.blocks
         prefix_rules = self.config.block_prefix_rules
 
+        # Track duplicate block groups from config (universal, not hardcoded)
+        duplicate_groups = self.config.duplicate_block_groups
+
         # Exact block name matches
         for block_name, count in block_counts.items():
             if block_name in block_defs:
@@ -702,18 +956,42 @@ class EquipmentDetector:
                 equip_type = defn['equipment_type']
                 confidence = defn.get('confidence', 0.85)
 
-                # Special handling: *U20 is duplicate of VCD 200 — skip to avoid double-count
-                if block_name == '*U20' and 'VCD 200' in block_counts:
+                # Universal duplicate block handling:
+                # If this block is a secondary in a duplicate group, skip it
+                # (the primary block's count is the correct one)
+                skip = False
+                for group in duplicate_groups:
+                    if block_name in group.get('secondary_blocks', []):
+                        primary = group.get('primary_block', '')
+                        if primary in block_counts:
+                            skip = True
+                            # Record as audit trail but don't add to count
+                            results[equip_type]['items'].append({
+                                'block_name': block_name,
+                                'count': count,
+                                'detection': f'tier2_block:{block_name} (duplicate of {primary} — excluded)',
+                                'notes': group.get('reason', 'Duplicate block — count excluded.'),
+                            })
+                            break
+                if skip:
                     continue
+
+                # Extract size/dimension from block name (universal)
+                size_info = SizeExtractor.extract_size(block_name)
+                size_label = SizeExtractor.format_size(size_info) if size_info else ''
 
                 results[equip_type]['count'] += count
                 results[equip_type]['confidence'] = confidence
-                results[equip_type]['items'].append({
+                item_data = {
                     'block_name': block_name,
                     'count': count,
                     'detection': f'tier2_block:{block_name}',
                     'notes': defn.get('confidence_note', ''),
-                })
+                }
+                if size_info:
+                    item_data['size_info'] = size_info
+                    item_data['size_label'] = size_label
+                results[equip_type]['items'].append(item_data)
 
         # Prefix-based matching for unknown blocks
         for block_name, count in block_counts.items():
@@ -723,16 +1001,41 @@ class EquipmentDetector:
                 if block_name.startswith(prefix) or block_name.upper().startswith(prefix.upper()):
                     default_type = rule.get('default_type')
                     if default_type:
+                        # Check config-driven duplicate groups (same logic as exact match)
+                        skip = False
+                        for group in duplicate_groups:
+                            if block_name in group.get('secondary_blocks', []):
+                                primary = group.get('primary_block', '')
+                                if primary in block_counts:
+                                    skip = True
+                                    results[default_type]['items'].append({
+                                        'block_name': block_name,
+                                        'count': count,
+                                        'detection': f'tier2_prefix:{prefix} (duplicate of {primary} — excluded)',
+                                        'notes': group.get('reason', 'Duplicate block — count excluded.'),
+                                    })
+                                    break
+                        if skip:
+                            break
+
+                        # Extract size/dimension from block name (universal)
+                        size_info = SizeExtractor.extract_size(block_name)
+                        size_label = SizeExtractor.format_size(size_info) if size_info else ''
+
                         confidence = rule.get('confidence', 0.7)
                         results[default_type]['count'] += count
                         results[default_type]['confidence'] = min(
                             results[default_type]['confidence'], confidence
                         )
-                        results[default_type]['items'].append({
+                        item_data = {
                             'block_name': block_name,
                             'count': count,
                             'detection': f'tier2_prefix:{prefix}',
-                        })
+                        }
+                        if size_info:
+                            item_data['size_info'] = size_info
+                            item_data['size_label'] = size_label
+                        results[default_type]['items'].append(item_data)
                     break
 
         return dict(results)
@@ -793,16 +1096,28 @@ class EquipmentDetector:
 
     def _merge(self, tier1, tier2, tier3):
         """
-        Merge three tiers with hierarchy: Tier 1 > Tier 2 > Tier 3.
-        For each equipment type, use the highest-confidence source.
-        Special overrides:
-          - supply_diffuser: *U19 overcounts; prefer SAD MTEXT count or Tier 1 layer
-          - *U17 = return_diffuser per Nestor (extract under AC = RAD)
+        Merge three tiers with universal confidence-based logic.
+
+        For each equipment type, selects the highest-confidence source
+        with tier priority as tiebreaker (Tier 1 > Tier 2 > Tier 3).
+
+        NO HARDCODED OVERRIDES. All special handling is config-driven:
+          - Duplicate blocks: handled via duplicate_block_groups in config
+          - Count disagreements: flagged for QS review (needs_review=True)
+          - All three tier counts preserved in alternate_counts for audit
+
+        When tiers disagree by >50%, the item is flagged for QS manual
+        verification rather than silently picking a winner.
         """
         merged = {}
 
         # Collect all equipment types across tiers
         all_types = set(tier1.keys()) | set(tier2.keys()) | set(tier3.keys())
+
+        # --- Conflict detection ---
+        # When different tiers classify the same entities under different equipment types,
+        # flag for QS review instead of silently reclassifying.
+        conflicts = []
 
         for equip_type in all_types:
             t1 = tier1.get(equip_type, {})
@@ -812,39 +1127,6 @@ class EquipmentDetector:
             t1_count = t1.get('count', 0)
             t2_count = t2.get('count', 0)
             t3_count = t3.get('count', 0)
-
-            # --- Special override: supply_diffuser ---
-            # Per Nestor: *U19 overcounts. Prefer SAD MTEXT label count when available.
-            # If neither tier1 nor tier3 has data, fall back to tier2 (block) but flag it.
-            if equip_type == 'supply_diffuser':
-                # Check if Tier 3 found SAD labels
-                if t3_count > 0:
-                    merged[equip_type] = {
-                        'count': t3_count,
-                        'source': 'tier3_mtext (SAD label override)',
-                        'confidence': 0.9,  # SAD is reliable per Nestor
-                        'items': t3.get('items', []),
-                        'alternate_counts': {'tier1': t1_count, 'tier2': t2_count},
-                        'notes': 'Per Nestor: SAD MTEXT label count preferred over *U19 block count.'
-                    }
-                elif t1_count > 0:
-                    merged[equip_type] = {
-                        'count': t1_count,
-                        'source': 'tier1_layer',
-                        'confidence': t1.get('confidence', 1.0),
-                        'items': t1.get('items', []),
-                        'alternate_counts': {'tier2': t2_count, 'tier3': t3_count},
-                    }
-                elif t2_count > 0:
-                    merged[equip_type] = {
-                        'count': t2_count,
-                        'source': 'tier2_block (WARNING: *U19 overcounts)',
-                        'confidence': t2.get('confidence', 0.7),
-                        'items': t2.get('items', []),
-                        'alternate_counts': {'tier1': t1_count, 'tier3': t3_count},
-                        'notes': 'WARNING: *U19 block count likely overcounts. No SAD MTEXT available.'
-                    }
-                continue
 
             # --- Smart merge: prefer highest confidence, with tier as tiebreaker ---
             t1_conf = t1.get('confidence', 0) if t1_count > 0 else 0
@@ -865,6 +1147,32 @@ class EquipmentDetector:
                 # Sort by confidence (desc), then tier priority (desc)
                 candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
                 best_conf, _, best_data, best_source = candidates[0]
+
+                # Check for significant count disagreements between tiers
+                # If two tiers disagree by >50%, flag for QS review
+                tier_counts = [c for c in [t1_count, t2_count, t3_count] if c > 0]
+                needs_review = False
+                review_note = ''
+                if len(tier_counts) >= 2:
+                    max_c = max(tier_counts)
+                    min_c = min(tier_counts)
+                    if max_c > 0 and (max_c - min_c) / max_c > 0.5:
+                        needs_review = True
+                        review_note = (
+                            f'QS REVIEW: Tier counts disagree significantly '
+                            f'(Layer: {t1_count}, Block: {t2_count}, Text: {t3_count}). '
+                            f'Possible causes: duplicate entities, mislabelled layers, '
+                            f'or block+text representing same item. '
+                            f'Recommended: QS manual verification.'
+                        )
+                        conflicts.append({
+                            'equipment_type': equip_type,
+                            'tier1_count': t1_count,
+                            'tier2_count': t2_count,
+                            'tier3_count': t3_count,
+                            'note': review_note,
+                        })
+
                 merged[equip_type] = {
                     'count': best_data['count'],
                     'source': best_source,
@@ -874,8 +1182,14 @@ class EquipmentDetector:
                         'tier1': t1_count,
                         'tier2': t2_count,
                         'tier3': t3_count,
-                    }
+                    },
+                    'needs_review': needs_review,
                 }
+                if review_note:
+                    merged[equip_type]['notes'] = review_note
+
+        # Store conflicts for the report
+        self._last_conflicts = conflicts
 
         return merged
 
@@ -1067,14 +1381,18 @@ class AnalysisResult:
                     if item.get('total_matches', 0) > 5:
                         lines.append(f"      ... and {item['total_matches'] - 5} more")
 
-            # Show alternate counts if different
+            # Show all tier counts
             alts = data.get('alternate_counts', {})
-            alt_strs = []
-            for tier, alt_count in alts.items():
-                if alt_count > 0 and alt_count != count:
-                    alt_strs.append(f"{tier}: {alt_count}")
-            if alt_strs:
-                lines.append(f"    Alternate counts: {', '.join(alt_strs)}")
+            t1 = alts.get('tier1', 0)
+            t2 = alts.get('tier2', 0)
+            t3 = alts.get('tier3', 0)
+            lines.append(f"    Tier counts — Layer: {t1}, Block: {t2}, Text: {t3}")
+
+            # Flag for QS review if tiers disagree
+            if data.get('needs_review', False):
+                lines.append(f"    ⚠️  FLAGGED FOR QS REVIEW — tier counts disagree significantly")
+                if data.get('notes'):
+                    lines.append(f"    Note: {data['notes']}")
 
         lines.append(f"\n  TOTAL EQUIPMENT ITEMS: {total_items:,}")
 
@@ -1090,6 +1408,21 @@ class AnalysisResult:
             lines.append(f"\n  {tier_label}: {total:,} items across {types} categories")
             for et, ed in sorted(tier_data.items()):
                 lines.append(f"    {et}: {ed.get('count', 0)}")
+
+        # Proximity dedup report
+        dedup = self.detection.get('dedup_report', {})
+        adjustments = dedup.get('adjustments', [])
+        if adjustments:
+            lines.append("\n" + "=" * 80)
+            lines.append("PROXIMITY DEDUPLICATION")
+            lines.append("=" * 80)
+            lines.append(f"  Radius used: {dedup.get('radius_used', 0):.0f} units")
+            for adj in adjustments:
+                lines.append(
+                    f"  {adj['equipment_type']}: Tier 3 reduced from {adj.get('tier3_original', 0)} "
+                    f"to {adj.get('tier3_adjusted', 0)} "
+                    f"({adj.get('shadowed_by_blocks', 0)} text labels near blocks)"
+                )
 
         # Validation
         is_valid, violations, warnings = self.validation

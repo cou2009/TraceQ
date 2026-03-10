@@ -198,19 +198,38 @@
     }
   },
 
+  "duplicate_block_groups": [
+    {
+      "_description": "Blocks that represent the same physical items. Only the primary block count is used.",
+      "primary_block": "VCD 200",
+      "secondary_blocks": ["*U20"],
+      "equipment_type": "volume_control_damper",
+      "reason": "VCD 200 and *U20 are alternate blocks for the same circular VCDs. Count VCD 200 only."
+    },
+    {
+      "primary_block": "*U16",
+      "secondary_blocks": ["*U17"],
+      "equipment_type": "return_diffuser",
+      "reason": "Both blocks represent the same return air diffusers. *U17 is the under-AC extract label for the same physical item."
+    }
+  ],
+
   "vcd_types": {
-    "_nestor_note": "Two types of VCD: circular and rectangular. Both vary in size.",
+    "_nestor_note": "Per Nestor Q3 (March 2026): Two types of VCD in Sample 5. Circular = 240, Rectangular = 800, Total = 1,040.",
     "circular": {
       "description": "Quantified by diameter (150mm, 200mm, 250mm, 300mm)",
       "location": "Connection point where flexible duct branches from main duct, serving supply air diffuser",
       "block_names": ["VCD 200", "*U20"],
-      "sizing": "Based on airflow requirements and duct configuration"
+      "sizing": "Based on airflow requirements and duct configuration",
+      "sample5_count": 240
     },
     "rectangular": {
-      "description": "Size corresponds to AC duct size",
+      "description": "Size corresponds to AC duct size (250x250mm in Sample 5)",
       "location": "Sub-branches of the main duct",
       "block_names": [],
-      "sizing": "Matches duct cross-section dimensions (e.g., 250x250mm)"
+      "block_names_note": "No specific block identified yet — count inferred from layer total minus circular count",
+      "sizing": "Matches duct cross-section dimensions (e.g., 250x250mm)",
+      "sample5_count": 800
     }
   },
 
