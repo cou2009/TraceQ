@@ -415,6 +415,196 @@ def _xl_val(v):
     return '—' if v is None else v
 
 
+def generate_nestor_feedback(comparisons, missing_from_boq, merged, drawing_name):
+    """
+    Auto-generate a simple QS feedback sheet from analysis results.
+    One tab, three columns: What TraceQ Found | Y/N | Comment.
+    Universal — works for any project, not just Sample 5.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Feedback"
+    ws.sheet_properties.tabColor = "1A1A2E"
+
+    title_font = Font(name='Arial', bold=True, size=14, color='1A1A2E')
+    sub_font = Font(name='Arial', size=10, color='666666')
+    hdr_font = Font(name='Arial', bold=True, size=11, color='FFFFFF')
+    hdr_fill = PatternFill('solid', fgColor='1A1A2E')
+    input_hdr_fill = PatternFill('solid', fgColor='B8860B')
+    bold_font = Font(name='Arial', bold=True, size=10)
+    normal_font = Font(name='Arial', size=10)
+    match_font = Font(name='Arial', size=10, color='28A745')
+    issue_font = Font(name='Arial', size=10, color='DC3545', bold=True)
+    q_font = Font(name='Arial', size=10, color='0066CC', bold=True)
+    gray_font = Font(name='Arial', size=9, color='999999')
+    input_fill = PatternFill('solid', fgColor='FFF9E6')
+    thin_border = Border(
+        left=Side(style='thin', color='DDDDDD'),
+        right=Side(style='thin', color='DDDDDD'),
+        top=Side(style='thin', color='DDDDDD'),
+        bottom=Side(style='thin', color='DDDDDD'),
+    )
+
+    drawing_short = drawing_name.replace('.dxf', '').replace('.DXF', '')
+
+    ws.merge_cells('A1:C1')
+    ws['A1'] = f'TraceQ Feedback — {drawing_short}'
+    ws['A1'].font = title_font
+    ws.merge_cells('A2:C2')
+    ws['A2'] = 'Just scan the list, type Y or N, add a comment if needed. 5 mins max.'
+    ws['A2'].font = sub_font
+
+    for col_letter, header, width, fill in [
+        ('A', 'What TraceQ Found', 55, hdr_fill),
+        ('B', 'Y / N', 10, input_hdr_fill),
+        ('C', 'Comment (if N)', 45, input_hdr_fill),
+    ]:
+        c = ws[f'{col_letter}4']
+        c.value = header
+        c.font = hdr_font
+        c.fill = fill
+        c.alignment = Alignment(horizontal='center', vertical='center')
+        c.border = thin_border
+        ws.column_dimensions[col_letter].width = width
+    ws.row_dimensions[4].height = 28
+
+    # Build rows from comparisons (BOQ items) and missing_from_boq
+    row = 5
+    review_items = []
+
+    for comp in comparisons:
+        equip = comp['Equipment']
+        risk = comp['Risk']
+        boq_qty = comp.get('_boq_qty', 0)
+        dwg_qty = comp.get('_drawing_qty')
+        source = comp.get('Detection Source', '—')
+
+        if risk == 'MATCH':
+            dwg_str = f"{dwg_qty:,}" if isinstance(dwg_qty, (int, float)) else str(dwg_qty)
+            boq_str = f"{boq_qty:,}" if isinstance(boq_qty, (int, float)) else str(boq_qty)
+            text = f"{equip}: TraceQ found {dwg_str}  (BOQ = {boq_str}) ✓"
+            font = match_font
+            hint = None
+        elif risk == 'VERIFY':
+            unit = comp.get('Unit', '')
+            boq_str = f"{boq_qty:,}" if isinstance(boq_qty, (int, float)) else str(boq_qty)
+            if dwg_qty and dwg_qty != '—':
+                dwg_str = f"{dwg_qty:,}" if isinstance(dwg_qty, (int, float)) else str(dwg_qty)
+                text = f"{equip}: TraceQ found {dwg_str}  (BOQ = {boq_str} {unit})"
+            else:
+                text = f"{equip}: not detected  (BOQ = {boq_str} {unit})"
+            font = normal_font
+            hint = f"BOQ is in {unit} — manual verification needed" if unit and unit != 'nos.' else None
+        elif risk in ('HIGH', 'MEDIUM', 'LOW'):
+            dwg_str = f"{dwg_qty:,}" if isinstance(dwg_qty, (int, float)) else str(dwg_qty)
+            boq_str = f"{boq_qty:,}" if isinstance(boq_qty, (int, float)) else str(boq_qty)
+            text = f"{equip}: TraceQ found {dwg_str}  (BOQ = {boq_str})"
+            font = issue_font if risk == 'HIGH' else normal_font
+            hint = None
+        else:
+            continue
+
+        # Check if this item is flagged for review in merged data
+        equip_key = equip.lower().replace(' ', '_')
+        merged_data = merged.get(equip_key, {})
+        if merged_data.get('needs_review'):
+            alt = merged_data.get('alternate_counts', {})
+            hint = f"Tier counts differ: Layer={alt.get('tier1', 0)}, Block={alt.get('tier2', 0)}, Text={alt.get('tier3', 0)}"
+            review_items.append(equip)
+
+        ws.cell(row, 1, text).font = font
+        ws.cell(row, 1).border = thin_border
+        ws.cell(row, 1).alignment = Alignment(vertical='center')
+        ws.cell(row, 2).fill = input_fill
+        ws.cell(row, 2).font = bold_font
+        ws.cell(row, 2).alignment = Alignment(horizontal='center', vertical='center')
+        ws.cell(row, 2).border = thin_border
+        ws.cell(row, 3).fill = input_fill
+        ws.cell(row, 3).font = normal_font
+        ws.cell(row, 3).alignment = Alignment(vertical='center', wrap_text=True)
+        ws.cell(row, 3).border = thin_border
+        if hint:
+            ws.cell(row, 3, hint).font = gray_font
+        ws.row_dimensions[row].height = 28
+        row += 1
+
+    # Missing from BOQ items
+    for m in missing_from_boq:
+        equip = m['Equipment']
+        qty = m['Drawing Qty']
+        qty_str = f"{qty:,}" if isinstance(qty, (int, float)) else str(qty)
+        text = f"{equip}: TraceQ found {qty_str}  (not in BOQ)"
+
+        ws.cell(row, 1, text).font = normal_font
+        ws.cell(row, 1).border = thin_border
+        ws.cell(row, 1).alignment = Alignment(vertical='center')
+        ws.cell(row, 2).fill = input_fill
+        ws.cell(row, 2).font = bold_font
+        ws.cell(row, 2).alignment = Alignment(horizontal='center', vertical='center')
+        ws.cell(row, 2).border = thin_border
+        ws.cell(row, 3).fill = input_fill
+        ws.cell(row, 3).font = normal_font
+        ws.cell(row, 3).alignment = Alignment(vertical='center', wrap_text=True)
+        ws.cell(row, 3).border = thin_border
+        ws.cell(row, 3, "Should this be in the BOQ?").font = gray_font
+        ws.row_dimensions[row].height = 28
+        row += 1
+
+    # Auto-generate questions for REVIEW items and HIGH risk items
+    row += 1
+    ws.cell(row, 1, 'QUICK QUESTIONS (just type a short answer)').font = Font(name='Arial', bold=True, size=11, color='0066CC')
+    ws.merge_cells(f'A{row}:C{row}')
+    row += 1
+
+    # Generate questions from review flags and high-risk items
+    auto_questions = []
+    for comp in comparisons:
+        risk = comp['Risk']
+        equip = comp['Equipment']
+        equip_key = equip.lower().replace(' ', '_')
+        merged_data = merged.get(equip_key, {})
+
+        if merged_data.get('needs_review'):
+            alt = merged_data.get('alternate_counts', {})
+            auto_questions.append(
+                f"{equip}: Tiers disagree — Layer found {alt.get('tier1', 0)}, "
+                f"Block found {alt.get('tier2', 0)}, Text found {alt.get('tier3', 0)}. "
+                f"Which count is correct?"
+            )
+        elif risk == 'HIGH':
+            dwg = comp.get('_drawing_qty', '?')
+            boq = comp.get('_boq_qty', '?')
+            auto_questions.append(
+                f"{equip}: TraceQ found {dwg} but BOQ has {boq}. "
+                f"What's the correct drawing count, and why the gap?"
+            )
+
+    if not auto_questions:
+        auto_questions.append("Any items TraceQ missed completely that should be detected?")
+
+    auto_questions.append("Any general feedback on how we can improve the detection?")
+
+    for q in auto_questions:
+        ws.cell(row, 1, q).font = q_font
+        ws.cell(row, 1).border = thin_border
+        ws.cell(row, 1).alignment = Alignment(vertical='center', wrap_text=True)
+        ws.merge_cells(f'B{row}:C{row}')
+        ws.cell(row, 2).fill = input_fill
+        ws.cell(row, 2).font = normal_font
+        ws.cell(row, 2).alignment = Alignment(vertical='center', wrap_text=True)
+        ws.cell(row, 2).border = thin_border
+        ws.cell(row, 3).border = thin_border
+        ws.row_dimensions[row].height = 40
+        row += 1
+
+    ws.freeze_panes = 'A5'
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output.getvalue()
+
+
 def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name, boq_name, merged=None, dedup_report=None):
     """
     Generate a professional Excel BOQ Discrepancy Report with 4 tabs:
@@ -1155,13 +1345,27 @@ else:
                     )
                     report_filename = f"TraceQ_BOQ_Report_{drawing_file.name.split('.')[0]}_{datetime.now().strftime('%Y%m%d')}.xlsx"
 
-                    st.download_button(
-                        label="📥 Download BOQ Discrepancy Report (Excel)",
-                        data=excel_bytes,
-                        file_name=report_filename,
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        type="primary",
-                    )
+                    col_dl1, col_dl2 = st.columns(2)
+                    with col_dl1:
+                        st.download_button(
+                            label="📥 Download BOQ Report (Client)",
+                            data=excel_bytes,
+                            file_name=report_filename,
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            type="primary",
+                        )
+                    with col_dl2:
+                        nestor_bytes = generate_nestor_feedback(
+                            comparisons, missing_from_boq, merged,
+                            drawing_file.name,
+                        )
+                        nestor_filename = f"TraceQ_QS_Feedback_{drawing_file.name.split('.')[0]}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+                        st.download_button(
+                            label="📋 Download QS Feedback Sheet",
+                            data=nestor_bytes,
+                            file_name=nestor_filename,
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        )
 
                     st.markdown("---")
 
