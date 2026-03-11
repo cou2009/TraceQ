@@ -582,11 +582,16 @@ class LayerClassifier:
 
             # Count keyword hits (each keyword counted at most once)
             hits = 0
+            has_exact_token = False
             for kw in keywords:
                 hit = False
                 # Token-level matching
                 for token in tokens:
-                    if kw == token or kw in token:
+                    if kw == token:
+                        hit = True
+                        has_exact_token = True
+                        break
+                    if kw in token:
                         hit = True
                         break
                     # Allow token-in-keyword only for tokens >= 3 chars
@@ -605,6 +610,12 @@ class LayerClassifier:
                 # Bonus for HVAC-prefixed layers (more likely to be equipment)
                 if 'HVAC' in upper or upper.startswith('M-'):
                     score = min(score + 0.15, 1.0)
+                # Exact token match floor: if a keyword matches a token exactly
+                # (e.g., layer contains "VCD" as a distinct token), ensure minimum
+                # score of 0.4. An exact abbreviation is a strong signal even if
+                # only one keyword out of many matches.
+                if has_exact_token and score < 0.4:
+                    score = 0.4
                 if score > best_score:
                     best_score = score
                     best_match = cat_name
@@ -1173,11 +1184,33 @@ class EquipmentDetector:
                             'note': review_note,
                         })
 
+                # When tiers disagree significantly AND Tier 1 (layer) is available,
+                # prefer Tier 1. Layers are drawn intentionally by the engineer to
+                # represent specific equipment types — they're the most deliberate
+                # classification. Blocks can be shared across types (overcounting),
+                # and text can be noisy. If Tier 1 is not available, keep the
+                # highest-confidence winner as usual.
+                final_count = best_data['count']
+                final_source = best_source
+                final_conf = best_conf
+                final_items = best_data.get('items', [])
+
+                if needs_review and t1_count > 0 and best_source != 'tier1_layer':
+                    # Tier 1 has data but wasn't the winner — override to Tier 1
+                    final_count = t1_count
+                    final_source = 'tier1_layer'
+                    final_conf = t1_conf
+                    final_items = t1.get('items', [])
+                    review_note += (
+                        f' → Merge overrode to Layer count ({t1_count:,}) '
+                        f'because tiers disagree and layers are engineer-assigned.'
+                    )
+
                 merged[equip_type] = {
-                    'count': best_data['count'],
-                    'source': best_source,
-                    'confidence': best_conf,
-                    'items': best_data.get('items', []),
+                    'count': final_count,
+                    'source': final_source,
+                    'confidence': final_conf,
+                    'items': final_items,
                     'alternate_counts': {
                         'tier1': t1_count,
                         'tier2': t2_count,
