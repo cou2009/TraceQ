@@ -57,19 +57,19 @@
       "nestor_confirmed": true
     },
     "ARGD 18": {
-      "equipment_type": "grille",
-      "description": "Ceiling grille — another type of air terminal for air distribution.",
-      "confidence": 0.85,
-      "confidence_note": "Per Nestor: not utilized in S5/S6 shared sample, therefore excluded from quantity take-off.",
+      "equipment_type": null,
+      "description": "Ceiling grille block — air terminal accessory, NOT separate equipment. Per Nestor (Mar 11): 'No grille is indicated in the layout plan. A grille is an accessory under air terminal devices.' 166 instances in S5 match FCU count — likely return air connection points.",
+      "confidence": 0,
+      "confidence_note": "SUPPRESSED: Nestor confirmed no grilles on plan. Do not count or report.",
       "samples_seen": ["S5", "S6"],
       "nestor_confirmed": true
     },
     "AC SPLIT": {
-      "equipment_type": "indoor_unit",
-      "sub_type": "split",
-      "description": "Split AC indoor unit. Not utilized in S5/S6 samples.",
-      "confidence": 0.85,
-      "confidence_note": "Per Nestor: not utilized in the shared sample layout.",
+      "equipment_type": "fcu",
+      "sub_type": "wall_mounted",
+      "description": "Wall-mounted FCU (split type). Per Nestor (Mar 11): '170 FCUs total = 166 ducted + 4 wall-mounted. Both types fall under indoor fan coil units.'",
+      "confidence": 0.9,
+      "confidence_note": "Reclassified from indoor_unit to fcu per Nestor. 4 units in S5.",
       "samples_seen": ["S5", "S6"],
       "nestor_confirmed": true
     },
