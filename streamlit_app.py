@@ -415,22 +415,25 @@ def _xl_val(v):
     return '—' if v is None else v
 
 
-def generate_nestor_feedback(comparisons, missing_from_boq, merged, drawing_name):
+def generate_nestor_feedback(comparisons, missing_from_boq, merged, drawing_name, scan=None):
     """
-    Auto-generate a simple QS feedback sheet from analysis results.
+    Auto-generate a QS feedback sheet merging Step 0 + BOQ results.
     One tab, three columns: What TraceQ Found | Y/N | Comment.
-    Universal — works for any project, not just Sample 5.
+    Sections: BOQ Comparison → Unknown Blocks/Layers → Quick Questions.
     """
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Feedback"
     ws.sheet_properties.tabColor = "1A1A2E"
 
+    # Styles
     title_font = Font(name='Arial', bold=True, size=14, color='1A1A2E')
     sub_font = Font(name='Arial', size=10, color='666666')
     hdr_font = Font(name='Arial', bold=True, size=11, color='FFFFFF')
     hdr_fill = PatternFill('solid', fgColor='1A1A2E')
     input_hdr_fill = PatternFill('solid', fgColor='B8860B')
+    section_font = Font(name='Arial', bold=True, size=11, color='1A1A2E')
+    section_fill = PatternFill('solid', fgColor='E8E8E8')
     bold_font = Font(name='Arial', bold=True, size=10)
     normal_font = Font(name='Arial', size=10)
     match_font = Font(name='Arial', size=10, color='28A745')
@@ -445,19 +448,21 @@ def generate_nestor_feedback(comparisons, missing_from_boq, merged, drawing_name
         bottom=Side(style='thin', color='DDDDDD'),
     )
 
-    drawing_short = drawing_name.replace('.dxf', '').replace('.DXF', '')
+    drawing_short = drawing_name.replace('.dxf', '').replace('.DXF', '').replace('.dwg', '').replace('.DWG', '')
 
+    # Header
     ws.merge_cells('A1:C1')
     ws['A1'] = f'TraceQ Feedback — {drawing_short}'
     ws['A1'].font = title_font
     ws.merge_cells('A2:C2')
-    ws['A2'] = 'Just scan the list, type Y or N, add a comment if needed. 5 mins max.'
+    ws['A2'] = 'Type Y or N for each item. Only add a comment if you mark N. Should take 5-10 mins.'
     ws['A2'].font = sub_font
 
+    # Column headers
     for col_letter, header, width, fill in [
-        ('A', 'What TraceQ Found', 55, hdr_fill),
+        ('A', 'TraceQ Result', 60, hdr_fill),
         ('B', 'Y / N', 10, input_hdr_fill),
-        ('C', 'Comment (if N)', 45, input_hdr_fill),
+        ('C', 'Comment (only if N)', 45, input_hdr_fill),
     ]:
         c = ws[f'{col_letter}4']
         c.value = header
@@ -468,53 +473,11 @@ def generate_nestor_feedback(comparisons, missing_from_boq, merged, drawing_name
         ws.column_dimensions[col_letter].width = width
     ws.row_dimensions[4].height = 28
 
-    # Build rows from comparisons (BOQ items) and missing_from_boq
-    row = 5
-    review_items = []
-
-    for comp in comparisons:
-        equip = comp['Equipment']
-        risk = comp['Risk']
-        boq_qty = comp.get('_boq_qty', 0)
-        dwg_qty = comp.get('_drawing_qty')
-        source = comp.get('Detection Source', '—')
-
-        if risk == 'MATCH':
-            dwg_str = f"{dwg_qty:,}" if isinstance(dwg_qty, (int, float)) else str(dwg_qty)
-            boq_str = f"{boq_qty:,}" if isinstance(boq_qty, (int, float)) else str(boq_qty)
-            text = f"{equip}: TraceQ found {dwg_str}  (BOQ = {boq_str}) ✓"
-            font = match_font
-            hint = None
-        elif risk == 'VERIFY':
-            unit = comp.get('Unit', '')
-            boq_str = f"{boq_qty:,}" if isinstance(boq_qty, (int, float)) else str(boq_qty)
-            if dwg_qty and dwg_qty != '—':
-                dwg_str = f"{dwg_qty:,}" if isinstance(dwg_qty, (int, float)) else str(dwg_qty)
-                text = f"{equip}: TraceQ found {dwg_str}  (BOQ = {boq_str} {unit})"
-            else:
-                text = f"{equip}: not detected  (BOQ = {boq_str} {unit})"
-            font = normal_font
-            hint = f"BOQ is in {unit} — manual verification needed" if unit and unit != 'nos.' else None
-        elif risk in ('HIGH', 'MEDIUM', 'LOW'):
-            dwg_str = f"{dwg_qty:,}" if isinstance(dwg_qty, (int, float)) else str(dwg_qty)
-            boq_str = f"{boq_qty:,}" if isinstance(boq_qty, (int, float)) else str(boq_qty)
-            text = f"{equip}: TraceQ found {dwg_str}  (BOQ = {boq_str})"
-            font = issue_font if risk == 'HIGH' else normal_font
-            hint = None
-        else:
-            continue
-
-        # Check if this item is flagged for review in merged data
-        equip_key = equip.lower().replace(' ', '_')
-        merged_data = merged.get(equip_key, {})
-        if merged_data.get('needs_review'):
-            alt = merged_data.get('alternate_counts', {})
-            hint = f"Tier counts differ: Layer={alt.get('tier1', 0)}, Block={alt.get('tier2', 0)}, Text={alt.get('tier3', 0)}"
-            review_items.append(equip)
-
+    def _add_row(ws, row, text, font, hint=None, row_height=28):
+        """Helper to add a standard feedback row."""
         ws.cell(row, 1, text).font = font
         ws.cell(row, 1).border = thin_border
-        ws.cell(row, 1).alignment = Alignment(vertical='center')
+        ws.cell(row, 1).alignment = Alignment(vertical='center', wrap_text=True)
         ws.cell(row, 2).fill = input_fill
         ws.cell(row, 2).font = bold_font
         ws.cell(row, 2).alignment = Alignment(horizontal='center', vertical='center')
@@ -525,38 +488,103 @@ def generate_nestor_feedback(comparisons, missing_from_boq, merged, drawing_name
         ws.cell(row, 3).border = thin_border
         if hint:
             ws.cell(row, 3, hint).font = gray_font
-        ws.row_dimensions[row].height = 28
+        ws.row_dimensions[row].height = row_height
+
+    def _add_section(ws, row, title):
+        """Helper to add a section header."""
+        ws.cell(row, 1, title).font = section_font
+        for col in range(1, 4):
+            ws.cell(row, col).fill = section_fill
+            ws.cell(row, col).border = thin_border
+        ws.merge_cells(f'A{row}:C{row}')
+        ws.row_dimensions[row].height = 30
+
+    row = 5
+
+    # ═══ SECTION 1: BOQ COMPARISON ═══
+    _add_section(ws, row, 'BOQ COMPARISON — Is TraceQ\'s count correct?')
+    row += 1
+
+    for comp in comparisons:
+        equip = comp['Equipment']
+        risk = comp['Risk']
+        boq_qty = comp.get('_boq_qty', 0)
+        dwg_qty = comp.get('_drawing_qty')
+
+        boq_str = f"{boq_qty:,}" if isinstance(boq_qty, (int, float)) else str(boq_qty)
+        dwg_str = f"{dwg_qty:,}" if isinstance(dwg_qty, (int, float)) and dwg_qty else str(dwg_qty or '—')
+
+        if risk == 'MATCH':
+            text = f"{equip}:  TraceQ = {dwg_str},  BOQ = {boq_str}"
+            font = match_font
+            hint = None
+        elif risk == 'VERIFY':
+            unit = comp.get('Unit', '')
+            if dwg_qty and dwg_qty != '—':
+                text = f"{equip}:  TraceQ = {dwg_str},  BOQ = {boq_str} {unit}"
+            else:
+                text = f"{equip}:  not detected,  BOQ = {boq_str} {unit}"
+            font = normal_font
+            hint = f"BOQ in {unit} — can't compare directly" if unit and unit != 'nos.' else None
+        elif risk in ('HIGH', 'MEDIUM', 'LOW'):
+            text = f"{equip}:  TraceQ = {dwg_str},  BOQ = {boq_str}"
+            font = issue_font if risk == 'HIGH' else normal_font
+            hint = None
+        else:
+            continue
+
+        # Add review hint if tiers disagree
+        equip_key = equip.lower().replace(' ', '_')
+        merged_data = merged.get(equip_key, {})
+        if merged_data.get('needs_review'):
+            alt = merged_data.get('alternate_counts', {})
+            hint = f"Tiers differ: Layer={alt.get('tier1', 0)}, Block={alt.get('tier2', 0)}, Text={alt.get('tier3', 0)}"
+
+        _add_row(ws, row, text, font, hint)
         row += 1
 
-    # Missing from BOQ items
+    # Missing from BOQ
     for m in missing_from_boq:
         equip = m['Equipment']
         qty = m['Drawing Qty']
         qty_str = f"{qty:,}" if isinstance(qty, (int, float)) else str(qty)
-        text = f"{equip}: TraceQ found {qty_str}  (not in BOQ)"
-
-        ws.cell(row, 1, text).font = normal_font
-        ws.cell(row, 1).border = thin_border
-        ws.cell(row, 1).alignment = Alignment(vertical='center')
-        ws.cell(row, 2).fill = input_fill
-        ws.cell(row, 2).font = bold_font
-        ws.cell(row, 2).alignment = Alignment(horizontal='center', vertical='center')
-        ws.cell(row, 2).border = thin_border
-        ws.cell(row, 3).fill = input_fill
-        ws.cell(row, 3).font = normal_font
-        ws.cell(row, 3).alignment = Alignment(vertical='center', wrap_text=True)
-        ws.cell(row, 3).border = thin_border
-        ws.cell(row, 3, "Should this be in the BOQ?").font = gray_font
-        ws.row_dimensions[row].height = 28
+        text = f"{equip}:  TraceQ found {qty_str}  (not in BOQ — should it be?)"
+        _add_row(ws, row, text, normal_font)
         row += 1
 
-    # Auto-generate questions for REVIEW items and HIGH risk items
-    row += 1
-    ws.cell(row, 1, 'QUICK QUESTIONS (just type a short answer)').font = Font(name='Arial', bold=True, size=11, color='0066CC')
-    ws.merge_cells(f'A{row}:C{row}')
-    row += 1
+    # ═══ SECTION 2: UNKNOWN BLOCKS & LAYERS (from Step 0) ═══
+    has_unknowns = False
+    if scan:
+        unrec_blocks = getattr(scan, 'unrecognised_blocks', []) or []
+        unrec_layers = getattr(scan, 'unrecognised_layers', []) or []
+        rec_blocks = getattr(scan, 'recognised_blocks', []) or []
 
-    # Generate questions from review flags and high-risk items
+        # Filter: only show unknown blocks with significant count (>5 occurrences)
+        sig_blocks = [ub for ub in unrec_blocks if ub.get('count', 0) > 5]
+        # Filter: only show unknown layers that look HVAC-related
+        hvac_hints = ['HVAC', 'AC', 'DUCT', 'DIFF', 'VCD', 'FCU', 'FAN', 'DAMPER', 'PIPE', 'REF', 'THERM', 'VRF', 'VRV', 'AHU']
+        sig_layers = [ul for ul in unrec_layers if any(h in ul.upper() for h in hvac_hints)]
+
+        if sig_blocks or sig_layers:
+            has_unknowns = True
+            row += 1
+            _add_section(ws, row, 'UNKNOWN ITEMS — Is this equipment? (Y = yes, N = not equipment)')
+            row += 1
+
+            for ub in sig_blocks:
+                block_name = ub.get('block', ub) if isinstance(ub, dict) else str(ub)
+                count = ub.get('count', '?') if isinstance(ub, dict) else '?'
+                text = f"Block \"{block_name}\" ({count} occurrences) — is this equipment?"
+                _add_row(ws, row, text, normal_font, hint="If Y, what equipment type?")
+                row += 1
+
+            for ul in sig_layers:
+                layer_name = ul if isinstance(ul, str) else str(ul)
+                text = f"Layer \"{layer_name}\" — is this an equipment layer?"
+                _add_row(ws, row, text, normal_font, hint="If Y, what equipment type?")
+                row += 1
+
+    # ═══ SECTION 3: QUICK QUESTIONS (only for genuinely ambiguous items) ═══
     auto_questions = []
     for comp in comparisons:
         risk = comp['Risk']
@@ -567,35 +595,33 @@ def generate_nestor_feedback(comparisons, missing_from_boq, merged, drawing_name
         if merged_data.get('needs_review'):
             alt = merged_data.get('alternate_counts', {})
             auto_questions.append(
-                f"{equip}: Tiers disagree — Layer found {alt.get('tier1', 0)}, "
-                f"Block found {alt.get('tier2', 0)}, Text found {alt.get('tier3', 0)}. "
-                f"Which count is correct?"
+                f"{equip}: Layer={alt.get('tier1', 0)}, Block={alt.get('tier2', 0)}, "
+                f"Text={alt.get('tier3', 0)} — which count is correct?"
             )
         elif risk == 'HIGH':
             dwg = comp.get('_drawing_qty', '?')
             boq = comp.get('_boq_qty', '?')
             auto_questions.append(
-                f"{equip}: TraceQ found {dwg} but BOQ has {boq}. "
-                f"What's the correct drawing count, and why the gap?"
+                f"{equip}: TraceQ found {dwg} but BOQ has {boq} — why the gap?"
             )
 
-    if not auto_questions:
-        auto_questions.append("Any items TraceQ missed completely that should be detected?")
-
-    auto_questions.append("Any general feedback on how we can improve the detection?")
-
-    for q in auto_questions:
-        ws.cell(row, 1, q).font = q_font
-        ws.cell(row, 1).border = thin_border
-        ws.cell(row, 1).alignment = Alignment(vertical='center', wrap_text=True)
-        ws.merge_cells(f'B{row}:C{row}')
-        ws.cell(row, 2).fill = input_fill
-        ws.cell(row, 2).font = normal_font
-        ws.cell(row, 2).alignment = Alignment(vertical='center', wrap_text=True)
-        ws.cell(row, 2).border = thin_border
-        ws.cell(row, 3).border = thin_border
-        ws.row_dimensions[row].height = 40
+    if auto_questions:
         row += 1
+        _add_section(ws, row, 'QUESTIONS (short answer needed)')
+        row += 1
+
+        for q in auto_questions:
+            ws.cell(row, 1, q).font = q_font
+            ws.cell(row, 1).border = thin_border
+            ws.cell(row, 1).alignment = Alignment(vertical='center', wrap_text=True)
+            ws.merge_cells(f'B{row}:C{row}')
+            ws.cell(row, 2).fill = input_fill
+            ws.cell(row, 2).font = normal_font
+            ws.cell(row, 2).alignment = Alignment(vertical='center', wrap_text=True)
+            ws.cell(row, 2).border = thin_border
+            ws.cell(row, 3).border = thin_border
+            ws.row_dimensions[row].height = 40
+            row += 1
 
     ws.freeze_panes = 'A5'
 
@@ -1073,6 +1099,15 @@ else:
                 )
                 st.stop()
 
+    # ─── Run Quick Scan once (shared between tabs) ────────────────────────────
+    scan = None
+    with st.spinner("Running quick scan..."):
+        try:
+            engine = TraceQEngine()
+            scan = engine.quick_scan(tmp_path)
+        except Exception as e:
+            st.error(f"Quick scan failed: {str(e)}")
+
     # ─── Step 0: Quick Scan + Full Analysis Tabs ──────────────────────────────
     tab_scan, tab_analysis = st.tabs(["Step 0: Quick Scan", "Full Analysis"])
 
@@ -1080,14 +1115,6 @@ else:
     with tab_scan:
         st.markdown("### Step 0 — Compatibility Scan")
         st.caption("Quick check: how much of this drawing does TraceQ recognise?")
-
-        with st.spinner("Running quick scan..."):
-            try:
-                engine = TraceQEngine()
-                scan = engine.quick_scan(tmp_path)
-            except Exception as e:
-                st.error(f"Quick scan failed: {str(e)}")
-                scan = None
 
         if scan and scan._dwg_unsupported:
             st.error(scan.verdict_msg)
@@ -1358,6 +1385,7 @@ else:
                         nestor_bytes = generate_nestor_feedback(
                             comparisons, missing_from_boq, merged,
                             drawing_file.name,
+                            scan=scan,
                         )
                         nestor_filename = f"TraceQ_QS_Feedback_{drawing_file.name.split('.')[0]}_{datetime.now().strftime('%Y%m%d')}.xlsx"
                         st.download_button(
