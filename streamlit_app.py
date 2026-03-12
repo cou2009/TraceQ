@@ -1012,12 +1012,13 @@ st.markdown('<p class="sub-header">BOQ Risk Review Engine — by TechTelligence<
 # ─── Sidebar ──────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### Upload Files")
-    st.markdown("Upload your HVAC drawing to analyse.")
+    st.markdown("Upload your HVAC drawing(s) to analyse.")
 
-    drawing_file = st.file_uploader(
-        "📐 Drawing File (DXF or DWG)",
+    drawing_files = st.file_uploader(
+        "📐 Drawing File(s) (DXF or DWG)",
         type=["dxf", "dwg"],
-        help="Upload the HVAC layout drawing in DXF or DWG format."
+        accept_multiple_files=True,
+        help="Upload one or more HVAC layout drawings in DXF or DWG format."
     )
 
     boq_file = st.file_uploader(
@@ -1056,14 +1057,14 @@ with st.sidebar:
 
 # ─── Main Content ─────────────────────────────────────────────────────────────
 
-if drawing_file is None:
+if not drawing_files:
     # Landing state — no file uploaded yet
     st.markdown("---")
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.markdown("#### 📐 Upload a Drawing")
-        st.markdown("Upload your HVAC layout drawing (DXF or DWG) using the sidebar.")
+        st.markdown("#### 📐 Upload Drawing(s)")
+        st.markdown("Upload your HVAC layout drawing(s) (DXF or DWG) using the sidebar.")
     with col2:
         st.markdown("#### 🔍 Automatic Analysis")
         st.markdown("TraceQ scans every layer, block, and text label to count equipment.")
@@ -1072,39 +1073,52 @@ if drawing_file is None:
         st.markdown("See discrepancies, missing items, and cost exposure at a glance.")
 
     st.markdown("---")
-    st.info("👈 Upload a DXF or DWG file in the sidebar to get started.")
+    st.info("👈 Upload one or more DXF/DWG files in the sidebar to get started.")
 
 else:
-    # Save uploaded file to temp for reuse
-    file_ext = os.path.splitext(drawing_file.name)[1].lower() or '.dxf'
-    with tempfile.NamedTemporaryFile(suffix=file_ext, delete=False) as tmp:
-        tmp.write(drawing_file.read())
-        tmp_path = tmp.name
+    # ─── Prepare all uploaded drawing files ───────────────────────────────────
+    tmp_paths = []  # List of (filename, tmp_path) tuples
+    for drawing_file in drawing_files:
+        file_ext = os.path.splitext(drawing_file.name)[1].lower() or '.dxf'
+        with tempfile.NamedTemporaryFile(suffix=file_ext, delete=False) as tmp:
+            tmp.write(drawing_file.read())
+            tmp_path = tmp.name
 
-    # ─── DWG → DXF Auto-Conversion ───────────────────────────────────────────
-    dwg_converted = False
-    if file_ext == '.dwg':
-        with st.spinner("Converting DWG to DXF..."):
-            try:
-                dxf_path = FileConverter.convert_dwg_to_dxf(tmp_path)
-                tmp_path = dxf_path  # Use converted DXF from here on
-                dwg_converted = True
-                st.success(f"✅ Converted **{drawing_file.name}** to DXF successfully.")
-            except RuntimeError as e:
-                st.error(
-                    f"⚠️ Could not convert DWG file automatically.\n\n"
-                    f"**What to do:** Open the DWG in AutoCAD or BricsCAD → File → Save As → DXF, "
-                    f"then upload the DXF version.\n\n"
-                    f"_Technical detail: {str(e)}_"
-                )
-                st.stop()
+        # DWG → DXF Auto-Conversion
+        if file_ext == '.dwg':
+            with st.spinner(f"Converting {drawing_file.name} DWG to DXF..."):
+                try:
+                    dxf_path = FileConverter.convert_dwg_to_dxf(tmp_path)
+                    tmp_path = dxf_path
+                    st.success(f"✅ Converted **{drawing_file.name}** to DXF successfully.")
+                except RuntimeError as e:
+                    st.error(
+                        f"⚠️ Could not convert {drawing_file.name} automatically.\n\n"
+                        f"**What to do:** Open the DWG in AutoCAD or BricsCAD → File → Save As → DXF, "
+                        f"then upload the DXF version.\n\n"
+                        f"_Technical detail: {str(e)}_"
+                    )
+                    continue  # Skip this file, process the rest
 
-    # ─── Run Quick Scan once (shared between tabs) ────────────────────────────
+        tmp_paths.append((drawing_file.name, tmp_path))
+
+    if not tmp_paths:
+        st.error("No valid drawing files to process.")
+        st.stop()
+
+    # ─── Display file count ───────────────────────────────────────────────────
+    drawing_names = [name for name, _ in tmp_paths]
+    drawing_name_combined = " + ".join(drawing_names)
+    if len(tmp_paths) > 1:
+        st.info(f"📂 **{len(tmp_paths)} drawing files** uploaded for combined analysis.")
+
+    # ─── Run Quick Scan on first file (shared between tabs) ───────────────────
+    # For multi-file: scan the first file for Quick Scan tab, full analysis merges all
     scan = None
     with st.spinner("Running quick scan..."):
         try:
             engine = TraceQEngine()
-            scan = engine.quick_scan(tmp_path)
+            scan = engine.quick_scan(tmp_paths[0][1])
         except Exception as e:
             st.error(f"Quick scan failed: {str(e)}")
 
@@ -1199,32 +1213,85 @@ else:
 
     # ═══ TAB 2: FULL ANALYSIS ════════════════════════════════════════════════
     with tab_analysis:
-        with st.spinner("Analysing drawing... this may take a moment."):
-            try:
-                engine = TraceQEngine()
-                result = engine.analyze(tmp_path)
-            except Exception as e:
-                st.error(f"Analysis failed: {str(e)}")
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-                st.stop()
+        # ─── Analyse all drawing files and merge results ─────────────────────────
+        all_results = []
+        combined_merged = {}
+        combined_parse_info = {'layers': 0, 'block_types': 0}
+        combined_dedup_report = None
 
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
+        with st.spinner(f"Analysing {'drawings' if len(tmp_paths) > 1 else 'drawing'}... this may take a moment."):
+            engine = TraceQEngine()
+            for fname, fpath in tmp_paths:
+                try:
+                    result = engine.analyze(fpath)
+                    all_results.append((fname, result))
+
+                    # Merge equipment counts across files
+                    file_merged = result.detection_results.get('merged', {})
+                    for equip_type, data in file_merged.items():
+                        if equip_type not in combined_merged:
+                            combined_merged[equip_type] = {
+                                'count': data.get('count', 0),
+                                'source': data.get('source', 'unknown'),
+                                'confidence': data.get('confidence', 0),
+                                'items': list(data.get('items', [])),
+                                'alternate_counts': dict(data.get('alternate_counts', {})),
+                                'needs_review': data.get('needs_review', False),
+                            }
+                            if data.get('notes'):
+                                combined_merged[equip_type]['notes'] = data['notes']
+                        else:
+                            # Sum counts from additional files
+                            existing = combined_merged[equip_type]
+                            existing['count'] += data.get('count', 0)
+                            existing['items'] = existing.get('items', []) + list(data.get('items', []))
+                            # Sum alternate counts
+                            for tier_key in ['tier1', 'tier2', 'tier3']:
+                                existing['alternate_counts'][tier_key] = (
+                                    existing['alternate_counts'].get(tier_key, 0)
+                                    + data.get('alternate_counts', {}).get(tier_key, 0)
+                                )
+                            # Keep needs_review if any file flags it
+                            if data.get('needs_review'):
+                                existing['needs_review'] = True
+
+                    # Merge parse info
+                    p = result.parse_info
+                    combined_parse_info['layers'] += p.get('layers', 0)
+                    combined_parse_info['block_types'] += p.get('block_types', 0)
+
+                except Exception as e:
+                    st.error(f"Analysis failed for {fname}: {str(e)}")
+
+            # Use the last result's dedup report (typically only one file has it)
+            if all_results:
+                result = all_results[-1][1]  # Keep last result for dedup/validation
+                combined_dedup_report = getattr(result, 'dedup_report', None)
+
+        # Clean up temp files
+        for _, fpath in tmp_paths:
+            try:
+                os.unlink(fpath)
+            except OSError:
+                pass
+
+        if not all_results:
+            st.error("No drawing files could be analysed.")
+            st.stop()
 
         # ─── Results Header ───────────────────────────────────────────────────────
-        st.success(f"✅ Analysis complete — **{drawing_file.name}**")
+        if len(all_results) == 1:
+            st.success(f"✅ Analysis complete — **{all_results[0][0]}**")
+        else:
+            st.success(f"✅ Analysis complete — **{len(all_results)} files** combined")
         st.markdown("---")
 
         # ─── Key Metrics ──────────────────────────────────────────────────────────
-        merged = result.detection_results.get('merged', {})
+        merged = combined_merged
         total_items = sum(v.get('count', 0) for v in merged.values())
         total_categories = len(merged)
-        parser_info = result.parse_info
+        parser_info = combined_parse_info
+        _dname = drawing_names[0].split('.')[0] if len(drawing_names) == 1 else f"{len(drawing_names)}_files"
 
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -1366,11 +1433,11 @@ else:
                     # ── EXCEL DOWNLOAD — top of report ──
                     excel_bytes = generate_excel_report(
                         comparisons, missing_from_boq, boq_items,
-                        drawing_file.name, boq_file.name,
+                        drawing_name_combined, boq_file.name,
                         merged=merged,
                         dedup_report=result.detection_results.get('dedup_report'),
                     )
-                    report_filename = f"TraceQ_BOQ_Report_{drawing_file.name.split('.')[0]}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+                    report_filename = f"TraceQ_BOQ_Report_{_dname}_{datetime.now().strftime('%Y%m%d')}.xlsx"
 
                     col_dl1, col_dl2 = st.columns(2)
                     with col_dl1:
@@ -1384,10 +1451,10 @@ else:
                     with col_dl2:
                         nestor_bytes = generate_nestor_feedback(
                             comparisons, missing_from_boq, merged,
-                            drawing_file.name,
+                            drawing_name_combined,
                             scan=scan,
                         )
-                        nestor_filename = f"TraceQ_QS_Feedback_{drawing_file.name.split('.')[0]}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+                        nestor_filename = f"TraceQ_QS_Feedback_{_dname}_{datetime.now().strftime('%Y%m%d')}.xlsx"
                         st.download_button(
                             label="📋 Download QS Feedback Sheet",
                             data=nestor_bytes,
@@ -1569,6 +1636,6 @@ else:
         st.download_button(
             label="📥 Download Full Analysis (JSON)",
             data=json_output,
-            file_name=f"TraceQ_Analysis_{drawing_file.name}_{datetime.now().strftime('%Y%m%d')}.json",
+            file_name=f"TraceQ_Analysis_{_dname}_{datetime.now().strftime('%Y%m%d')}.json",
             mime="application/json",
         )

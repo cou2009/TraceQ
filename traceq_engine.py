@@ -1210,6 +1210,24 @@ class EquipmentDetector:
                         f'because tiers disagree and layers are engineer-assigned.'
                     )
 
+                # Sub-type uplift: when T1 and T2 are close (within 10%) but
+                # T2 is slightly higher, prefer T2. This catches cases where
+                # T1 finds the main sub-type (e.g., 166 ducted FCUs) and T2
+                # finds ALL sub-types (e.g., 166 ducted + 4 wall-mounted = 170).
+                # The small difference indicates T2 is a superset, not an overcount.
+                if (t1_count > 0 and t2_count > t1_count
+                        and t2_count > 0
+                        and (t2_count - t1_count) / t2_count <= 0.10):
+                    final_count = t2_count
+                    final_source = 'tier2_block'
+                    final_conf = t2_conf
+                    final_items = t2.get('items', [])
+                    review_note += (
+                        f' → T2 ({t2_count:,}) is slightly higher than T1 '
+                        f'({t1_count:,}), within 10% — likely includes additional '
+                        f'sub-types. Using T2 as superset.'
+                    )
+
                 merged[equip_type] = {
                     'count': final_count,
                     'source': final_source,

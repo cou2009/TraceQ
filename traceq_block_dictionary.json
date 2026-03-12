@@ -57,10 +57,11 @@
       "nestor_confirmed": true
     },
     "ARGD 18": {
-      "equipment_type": null,
-      "description": "Ceiling grille block — air terminal accessory, NOT separate equipment. Per Nestor (Mar 11): 'No grille is indicated in the layout plan. A grille is an accessory under air terminal devices.' 166 instances in S5 match FCU count — likely return air connection points.",
-      "confidence": 0,
-      "confidence_note": "SUPPRESSED: Nestor confirmed no grilles on plan. Do not count or report.",
+      "equipment_type": "fcu",
+      "sub_type": "ducted",
+      "description": "Ducted-type FCU block. Per Nestor (Mar 12): 'ARGD 18 appears to function as a generic block name. It should be interpreted as a ducted-type FCU, and therefore it corresponds accurately with the actual quantity of FCUs indicated in the drawings.' 166 instances in S5 = 166 ducted FCUs. NOTE: Nestor gave 3 different answers for this block — grille (Mar 9), not equipment (Mar 11), ducted FCU (Mar 12). The Mar 12 answer is accepted as it aligns with the 166 count matching ducted FCU count.",
+      "confidence": 0.9,
+      "confidence_note": "Reclassified from null (suppressed) to fcu/ducted per Nestor round 3. 166 items = exact ducted FCU count.",
       "samples_seen": ["S5", "S6"],
       "nestor_confirmed": true
     },
@@ -103,6 +104,14 @@
       "confidence": 0.9,
       "confidence_note": "Nestor confirmed findings are plausible real-world errors.",
       "samples_seen": ["P4"],
+      "nestor_confirmed": true
+    },
+    "$0$$0$$0$vcdd": {
+      "equipment_type": "volume_control_damper",
+      "description": "Generic VCD block. Per Nestor (Mar 12): 'This item appears to be a generic block name and corresponds to a VCD (Volume Control Damper) in the drawing.' Confirmed via AutoCAD block definition screenshot.",
+      "confidence": 0.85,
+      "confidence_note": "VCD already counted reliably via layer detection (1,040). This block entry is for dictionary completeness and future projects.",
+      "samples_seen": ["S5"],
       "nestor_confirmed": true
     }
   },
@@ -189,7 +198,7 @@
       "patterns": ["PLENUM BOX", "PLENUM\\s+BOX.*SIZE"],
       "count_method": "count_occurrences",
       "confidence": 0.4,
-      "notes": "Per Nestor: can be polylines, blocks, or annotations."
+      "notes": "Per Nestor (Mar 12): 96 plenum boxes in S5, measured in sqm not nos. Height 0.3m x Length 1m x 96 qty = 115.2 sqm total. BOQ lists in sqm — this is a VERIFY item (unit mismatch). Engine currently finds 24 via text labels (25% of actual). Often incorporated into supply air duct quantity in conventional takeoff."
     },
     "extract_diffuser": {
       "patterns": ["\\bEAD\\b", "\\bE\\.?A\\.?D\\b", "EXTRACT AIR DIFF", "EXTRACT.*DIFF"],
