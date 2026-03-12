@@ -462,7 +462,7 @@ def generate_nestor_feedback(comparisons, missing_from_boq, merged, drawing_name
     for col_letter, header, width, fill in [
         ('A', 'TraceQ Result', 60, hdr_fill),
         ('B', 'Y / N', 10, input_hdr_fill),
-        ('C', 'Comment (only if N)', 45, input_hdr_fill),
+        ('C', 'Comment (only if N)', 65, input_hdr_fill),
     ]:
         c = ws[f'{col_letter}4']
         c.value = header
@@ -1052,7 +1052,7 @@ with st.sidebar:
     )
     st.markdown("---")
     st.markdown("*Built by [TechTelligence](mailto:nicholas@ttelligence.com)*")
-    st.markdown("*v1.2 — March 2026*")
+    st.markdown("*v1.3 — March 2026*")
 
 
 # ─── Main Content ─────────────────────────────────────────────────────────────
