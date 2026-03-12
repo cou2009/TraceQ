@@ -449,6 +449,11 @@ def generate_nestor_feedback(comparisons, missing_from_boq, merged, drawing_name
     )
 
     drawing_short = drawing_name.replace('.dxf', '').replace('.DXF', '').replace('.dwg', '').replace('.DWG', '')
+    # Truncate long multi-file titles
+    if len(drawing_short) > 80:
+        file_count = drawing_short.count(' + ') + 1
+        first_file = drawing_short.split(' + ')[0]
+        drawing_short = f"{first_file} + {file_count - 1} more files"
 
     # Header
     ws.merge_cells('A1:C1')
@@ -1112,13 +1117,36 @@ else:
     if len(tmp_paths) > 1:
         st.info(f"📂 **{len(tmp_paths)} drawing files** uploaded for combined analysis.")
 
-    # ─── Run Quick Scan on first file (shared between tabs) ───────────────────
-    # For multi-file: scan the first file for Quick Scan tab, full analysis merges all
+    # ─── Run Quick Scan (shared between tabs) ──────────────────────────────────
+    # Quick Scan tab shows first file. For multi-file feedback sheet, merge all scans.
     scan = None
+    scan_for_feedback = None
     with st.spinner("Running quick scan..."):
         try:
             engine = TraceQEngine()
             scan = engine.quick_scan(tmp_paths[0][1])
+            # For multi-file: merge unrecognised blocks/layers from ALL files
+            if len(tmp_paths) > 1:
+                import copy
+                scan_for_feedback = copy.deepcopy(scan)
+                all_unrec_blocks = {}
+                all_unrec_layers = set()
+                for _, fpath in tmp_paths:
+                    fs = engine.quick_scan(fpath)
+                    for ub in (getattr(fs, 'unrecognised_blocks', []) or []):
+                        bname = ub.get('block', ub) if isinstance(ub, dict) else str(ub)
+                        cnt = ub.get('count', 0) if isinstance(ub, dict) else 0
+                        if bname in all_unrec_blocks:
+                            all_unrec_blocks[bname]['count'] += cnt
+                        else:
+                            all_unrec_blocks[bname] = {'block': bname, 'count': cnt}
+                    for ul in (getattr(fs, 'unrecognised_layers', []) or []):
+                        layer_name = ul if isinstance(ul, str) else str(ul)
+                        all_unrec_layers.add(layer_name)
+                scan_for_feedback.unrecognised_blocks = list(all_unrec_blocks.values())
+                scan_for_feedback.unrecognised_layers = list(all_unrec_layers)
+            else:
+                scan_for_feedback = scan
         except Exception as e:
             st.error(f"Quick scan failed: {str(e)}")
 
@@ -1452,7 +1480,7 @@ else:
                         nestor_bytes = generate_nestor_feedback(
                             comparisons, missing_from_boq, merged,
                             drawing_name_combined,
-                            scan=scan,
+                            scan=scan_for_feedback,
                         )
                         nestor_filename = f"TraceQ_QS_Feedback_{_dname}_{datetime.now().strftime('%Y%m%d')}.xlsx"
                         st.download_button(
