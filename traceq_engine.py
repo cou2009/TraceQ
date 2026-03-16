@@ -80,6 +80,11 @@ class Config:
         """Config-driven duplicate block detection. Returns list of groups."""
         return self.block_dictionary.get("duplicate_block_groups", [])
 
+    @property
+    def skip_blocks(self):
+        """Blocks known to be non-equipment (arrows, title blocks, etc.). Skip in detection and unknowns."""
+        return self.block_dictionary.get("skip_blocks", {})
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # FILE CONVERTER (DWG → DXF)
@@ -960,8 +965,14 @@ class EquipmentDetector:
         # Track duplicate block groups from config (universal, not hardcoded)
         duplicate_groups = self.config.duplicate_block_groups
 
+        # Load skip blocks (known non-equipment like arrows, title blocks)
+        skip_blocks = self.config.skip_blocks
+
         # Exact block name matches
         for block_name, count in block_counts.items():
+            # Skip known non-equipment blocks
+            if block_name in skip_blocks:
+                continue
             if block_name in block_defs:
                 defn = block_defs[block_name]
                 equip_type = defn.get('equipment_type')
@@ -991,17 +1002,30 @@ class EquipmentDetector:
                 if skip:
                     continue
 
+                # Short NAMED block names (≤4 chars, not *U or $0$ prefixed)
+                # are ambiguous across consultants. e.g., "LFD" = fire damper
+                # in P3, but could be "linear flow diffuser" in another project.
+                # Anonymous blocks (*U5, *U19) and system blocks ($0$...) are
+                # drawing-specific and safe — they won't match across projects.
+                # SKIP short named blocks entirely — they'll appear in the
+                # unrecognised blocks section for Nestor to verify per project.
+                is_anonymous = block_name.startswith('*') or block_name.startswith('$')
+                is_short_named_block = len(block_name.strip()) <= 4 and not is_anonymous
+                if is_short_named_block:
+                    continue
+
                 # Extract size/dimension from block name (universal)
                 size_info = SizeExtractor.extract_size(block_name)
                 size_label = SizeExtractor.format_size(size_info) if size_info else ''
 
                 results[equip_type]['count'] += count
                 results[equip_type]['confidence'] = confidence
+                short_note = ''
                 item_data = {
                     'block_name': block_name,
                     'count': count,
                     'detection': f'tier2_block:{block_name}',
-                    'notes': defn.get('confidence_note', ''),
+                    'notes': defn.get('confidence_note', '') + short_note,
                 }
                 if size_info:
                     item_data['size_info'] = size_info
@@ -1010,8 +1034,8 @@ class EquipmentDetector:
 
         # Prefix-based matching for unknown blocks
         for block_name, count in block_counts.items():
-            if block_name in block_defs:
-                continue  # Already matched
+            if block_name in block_defs or block_name in skip_blocks:
+                continue  # Already matched or known non-equipment
             for prefix, rule in prefix_rules.items():
                 if block_name.startswith(prefix) or block_name.upper().startswith(prefix.upper()):
                     default_type = rule.get('default_type')
@@ -1771,11 +1795,15 @@ class TraceQEngine:
         block_names = list(parser.insert_counts_by_block.keys())
         known_blocks = self.config.blocks
         prefix_rules = self.config.block_prefix_rules
+        skip_blocks = self.config.skip_blocks
 
         recognised_blocks = []
         unrecognised_blocks = []
         for bname in block_names:
             count = parser.insert_counts_by_block[bname]
+            # Skip known non-equipment blocks (arrows, title blocks, etc.)
+            if bname in skip_blocks:
+                continue
             # Check exact match
             if bname in known_blocks:
                 recognised_blocks.append({

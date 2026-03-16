@@ -1,7 +1,11 @@
 {
-  "_version": "1.0",
-  "_source": "Consolidated from Samples 3, 4, 5, 6 + Nestor feedback (March 2026)",
-  "_notes": "Block names are case-sensitive in DXF. confidence_note explains special handling.",
+  "_version": "1.1",
+  "_source": "Consolidated from Samples 1-6 + Nestor feedback (March 2026)",
+  "_notes": "Block names are case-sensitive in DXF. confidence_note explains special handling. v1.1: Added blocks from S1, S2, S3 unknown block analysis.",
+  "_changelog": {
+    "v1.0": "Initial 14 blocks from S5/S6/P3/P4",
+    "v1.1": "Added 16 new blocks from S1/S2/S3 analysis (total: 30 blocks). Also added flow direction arrows and non-HVAC blocks to skip list."
+  },
 
   "blocks": {
     "*U19": {
@@ -59,7 +63,7 @@
     "ARGD 18": {
       "equipment_type": "fcu",
       "sub_type": "ducted",
-      "description": "Ducted-type FCU block. Per Nestor (Mar 12): 'ARGD 18 appears to function as a generic block name. It should be interpreted as a ducted-type FCU, and therefore it corresponds accurately with the actual quantity of FCUs indicated in the drawings.' 166 instances in S5 = 166 ducted FCUs. NOTE: Nestor gave 3 different answers for this block — grille (Mar 9), not equipment (Mar 11), ducted FCU (Mar 12). The Mar 12 answer is accepted as it aligns with the 166 count matching ducted FCU count.",
+      "description": "Ducted-type FCU block. Per Nestor (Mar 12): appears to function as a generic block name, interpreted as a ducted-type FCU.",
       "confidence": 0.9,
       "confidence_note": "Reclassified from null (suppressed) to fcu/ducted per Nestor round 3. 166 items = exact ducted FCU count.",
       "samples_seen": ["S5", "S6"],
@@ -68,7 +72,7 @@
     "AC SPLIT": {
       "equipment_type": "fcu",
       "sub_type": "wall_mounted",
-      "description": "Wall-mounted FCU (split type). Per Nestor (Mar 11): '170 FCUs total = 166 ducted + 4 wall-mounted. Both types fall under indoor fan coil units.'",
+      "description": "Wall-mounted FCU (split type). 170 FCUs total = 166 ducted + 4 wall-mounted.",
       "confidence": 0.9,
       "confidence_note": "Reclassified from indoor_unit to fcu per Nestor. 4 units in S5.",
       "samples_seen": ["S5", "S6"],
@@ -86,7 +90,7 @@
       "equipment_type": "fire_damper",
       "description": "Fire damper block (Project 3 Villa). 146 found on drawings, ZERO in BOQ.",
       "confidence": 0.95,
-      "confidence_note": "Nestor confirmed: 'any item shown in the layout should be properly quantified and priced.'",
+      "confidence_note": "Nestor confirmed. NOTE: Short named block (3 chars) — engine skips these in Tier 2 to prevent cross-project false positives. Will appear in unknowns for per-project verification.",
       "samples_seen": ["P3"],
       "nestor_confirmed": true
     },
@@ -94,7 +98,7 @@
       "equipment_type": "volume_control_damper",
       "description": "VCD block (lowercase, Project 3). Different naming convention from S5/S6.",
       "confidence": 0.9,
-      "confidence_note": "Project 3 used lowercase block names.",
+      "confidence_note": "Project 3 used lowercase block names. NOTE: Short named block — skipped in Tier 2.",
       "samples_seen": ["P3"],
       "nestor_confirmed": false
     },
@@ -102,17 +106,225 @@
       "equipment_type": "fire_damper",
       "description": "Fire damper (duct fire damper) block — Project 4. 140 generic + 13 sized (FD-300, FD-250, FD-400).",
       "confidence": 0.9,
-      "confidence_note": "Nestor confirmed findings are plausible real-world errors.",
+      "confidence_note": "Nestor confirmed. NOTE: Short named block — skipped in Tier 2.",
       "samples_seen": ["P4"],
       "nestor_confirmed": true
     },
     "$0$$0$$0$vcdd": {
       "equipment_type": "volume_control_damper",
-      "description": "Generic VCD block. Per Nestor (Mar 12): 'This item appears to be a generic block name and corresponds to a VCD (Volume Control Damper) in the drawing.' Confirmed via AutoCAD block definition screenshot.",
+      "description": "Generic VCD block. Confirmed as VCD via AutoCAD block definition.",
       "confidence": 0.85,
-      "confidence_note": "VCD already counted reliably via layer detection (1,040). This block entry is for dictionary completeness and future projects.",
+      "confidence_note": "VCD already counted reliably via layer detection (1,040). This block entry is for dictionary completeness.",
       "samples_seen": ["S5"],
       "nestor_confirmed": true
+    },
+
+    "R S": {
+      "equipment_type": "return_diffuser",
+      "description": "Return air diffuser block — abbreviated as 'R S' (Return Side). 209 found in S2.",
+      "confidence": 0.85,
+      "confidence_note": "S2 BOQ has flow bar slot diffusers (supply/return pairs) + volume dampers. This block likely represents return air terminals. Needs Nestor confirmation.",
+      "samples_seen": ["S2"],
+      "nestor_confirmed": false
+    },
+    "A S": {
+      "equipment_type": "supply_diffuser",
+      "description": "Supply air diffuser block — abbreviated as 'A S' (Air Supply). 110 found in S2.",
+      "confidence": 0.85,
+      "confidence_note": "S2 BOQ has flow bar slot diffusers (supply/return pairs). This block likely represents supply air terminals. Needs Nestor confirmation.",
+      "samples_seen": ["S2"],
+      "nestor_confirmed": false
+    },
+    "AC-03": {
+      "equipment_type": "indoor_unit",
+      "description": "AC indoor unit model designation. 33 found in S2.",
+      "confidence": 0.8,
+      "confidence_note": "Named as AC unit model number. Needs Nestor confirmation for exact equipment category.",
+      "samples_seen": ["S2"],
+      "nestor_confirmed": false
+    },
+    "300x300 R DIFF": {
+      "equipment_type": "return_diffuser",
+      "sub_type": "square",
+      "size": "300x300mm",
+      "description": "300x300mm return air diffuser. Self-descriptive block name.",
+      "confidence": 0.95,
+      "confidence_note": "Block name explicitly states dimensions and type. High confidence.",
+      "samples_seen": ["S2"],
+      "nestor_confirmed": false
+    },
+    "RETURN AIR DIFFUSER": {
+      "equipment_type": "return_diffuser",
+      "description": "Return air diffuser block. Self-descriptive name. 9 found in S2.",
+      "confidence": 0.95,
+      "confidence_note": "Block name is self-explanatory.",
+      "samples_seen": ["S2"],
+      "nestor_confirmed": false
+    },
+    "300x300 DIFF": {
+      "equipment_type": "supply_diffuser",
+      "sub_type": "square",
+      "size": "300x300mm",
+      "description": "300x300mm diffuser (assumed supply — return has explicit 'R' prefix). 8 found in S2.",
+      "confidence": 0.85,
+      "confidence_note": "No explicit S/R designation but by convention, if 'R DIFF' is return, plain 'DIFF' is supply. Needs Nestor confirmation.",
+      "samples_seen": ["S2"],
+      "nestor_confirmed": false
+    },
+    "600 L P S": {
+      "equipment_type": "supply_diffuser",
+      "sub_type": "linear_slot",
+      "size": "600mm",
+      "description": "600mm linear plenum supply diffuser. 8 found in S2. S2 BOQ lists multiple flow bar slot diffusers.",
+      "confidence": 0.8,
+      "confidence_note": "L P S = Linear Plenum Supply. Maps to flow bar / linear slot diffuser category in BOQ. Needs Nestor confirmation.",
+      "samples_seen": ["S2"],
+      "nestor_confirmed": false
+    },
+    "Centrifugal": {
+      "equipment_type": "exhaust_fan",
+      "description": "Centrifugal fan block. 4 found in S2. S2 BOQ lists smoke extract fan, makeup air fan, toilet extract fans.",
+      "confidence": 0.8,
+      "confidence_note": "Generic fan type. Could be exhaust or supply fan. Needs Nestor confirmation.",
+      "samples_seen": ["S2"],
+      "nestor_confirmed": false
+    },
+    "SOUND": {
+      "equipment_type": "sound_attenuator",
+      "description": "Sound attenuator block. 2 found in S2.",
+      "confidence": 0.85,
+      "confidence_note": "Short block name but descriptive. S2 doesn't list sound attenuators in BOQ — this is a 'found on drawing but not in BOQ' item.",
+      "samples_seen": ["S2"],
+      "nestor_confirmed": false
+    },
+    "RETURN GRILL": {
+      "equipment_type": "return_diffuser",
+      "description": "Return grille block. 2 found in S2. Maps to return air grille in BOQ.",
+      "confidence": 0.95,
+      "confidence_note": "Self-descriptive block name.",
+      "samples_seen": ["S2"],
+      "nestor_confirmed": false
+    },
+    "supply": {
+      "equipment_type": "supply_diffuser",
+      "description": "Supply air diffuser block (generic name). 2 found in S2.",
+      "confidence": 0.7,
+      "confidence_note": "Very generic name. Likely supply air terminal. Needs Nestor confirmation. NOTE: Short named block — may be skipped in Tier 2.",
+      "samples_seen": ["S2"],
+      "nestor_confirmed": false
+    },
+
+    "RXYTQ-TYF": {
+      "equipment_type": "outdoor_unit",
+      "sub_type": "vrf",
+      "description": "Daikin VRF outdoor unit model (RXYTQ series). 23 found across S3 drawings. S3 BOQ lists 16 VRF units.",
+      "confidence": 0.95,
+      "confidence_note": "Daikin model number is industry-recognizable. RXYTQ = VRV/VRF outdoor unit. Count may differ from BOQ because drawings show units across all floors (including duplicates in reflected ceiling plans).",
+      "samples_seen": ["S3"],
+      "nestor_confirmed": false
+    },
+    "EXAUST AIR DIFFUSER": {
+      "equipment_type": "extract_diffuser",
+      "description": "Exhaust/extract air diffuser block. 15 found in S3. Note: misspelled 'EXAUST' instead of 'EXHAUST'.",
+      "confidence": 0.95,
+      "confidence_note": "Self-descriptive despite typo. Maps to extract air diffuser category.",
+      "samples_seen": ["S3"],
+      "nestor_confirmed": false
+    },
+    "RADIFFUSER": {
+      "equipment_type": "return_diffuser",
+      "description": "Return Air Diffuser block (concatenated name). 9 found in S3.",
+      "confidence": 0.95,
+      "confidence_note": "RA = Return Air. Self-descriptive despite concatenated format.",
+      "samples_seen": ["S3"],
+      "nestor_confirmed": false
+    },
+    "return opening": {
+      "equipment_type": "return_diffuser",
+      "description": "Return air opening block. 7 found in S3. Represents return air grille/opening.",
+      "confidence": 0.85,
+      "confidence_note": "Likely a return air grille or opening. Needs Nestor confirmation for exact classification.",
+      "samples_seen": ["S3"],
+      "nestor_confirmed": false
+    },
+    "ACOUSTIC ELBOW": {
+      "equipment_type": "sound_attenuator",
+      "description": "Acoustic elbow fitting block. 7 found in S3. Duct fitting with acoustic lining.",
+      "confidence": 0.85,
+      "confidence_note": "Acoustic fitting — related to noise control. Maps to sound attenuator / acoustic fitting category.",
+      "samples_seen": ["S3"],
+      "nestor_confirmed": false
+    },
+    "VOLUME CONTROL DAMPER 1": {
+      "equipment_type": "volume_control_damper",
+      "description": "Volume control damper block. 9 found in S1. S1 BOQ lists 98 VCDs.",
+      "confidence": 0.95,
+      "confidence_note": "Fully descriptive block name. High confidence.",
+      "samples_seen": ["S1"],
+      "nestor_confirmed": false
+    }
+  },
+
+  "skip_blocks": {
+    "_description": "Blocks that are NOT HVAC equipment. Engine should ignore these entirely to prevent false positives.",
+    "R-ARROW": {"description": "Duct flow direction arrow (return)", "samples_seen": ["S3"]},
+    "S-ARROW": {"description": "Duct flow direction arrow (supply)", "samples_seen": ["S3"]},
+    "F": {"description": "Likely furniture or annotation symbol — too generic to classify", "samples_seen": ["S3"]},
+    "T": {"description": "Likely text or title block symbol — too generic to classify", "samples_seen": ["S3"]},
+    "FA WIRE MESH": {"description": "Fire alarm wire mesh — electrical, not HVAC", "samples_seen": ["S3"]},
+    "XR-TITLE BLOCK": {"description": "Drawing title block — not equipment", "samples_seen": ["S3"]},
+    "_OBLIQUE": {"description": "Text formatting block — not equipment", "samples_seen": ["S3"]},
+    "ARROW NEW": {"description": "Duct flow direction arrow", "samples_seen": ["S4"]},
+    "REVNO": {"description": "Revision number annotation — not equipment", "samples_seen": ["S4"]},
+    "xref-bg": {"description": "External reference background — not equipment", "samples_seen": ["S4"]},
+    "PLAN GF$0$STD-DIM": {"description": "Dimension standard block — not equipment", "samples_seen": ["S1"]},
+    "FIN": {"description": "Likely 'finish' annotation — not equipment", "samples_seen": ["S1"]},
+    "legend": {"description": "Drawing legend block — not equipment", "samples_seen": ["S5", "S6"]},
+    "HOSE": {"description": "Fire hose — plumbing/fire, not HVAC", "samples_seen": ["S4"]},
+    "CAP": {"description": "Pipe cap or end cap — plumbing, not HVAC", "samples_seen": ["S4"]}
+  },
+
+  "needs_nestor_review": {
+    "_description": "Blocks that need Nestor's expertise to identify. Grouped by sample.",
+    "S1": {
+      "*X142 (70)": "Highest count unknown block in S1. Needs visual identification.",
+      "*U212 (66)": "Anonymous block — could be diffuser or other equipment.",
+      "*U86 (54)": "Anonymous block — could be diffuser or other equipment.",
+      "SETFW4 (30)": "Unknown — possibly electrical or architectural.",
+      "*U137 (28)": "Anonymous block — needs identification.",
+      "*U64 (27)": "Anonymous block — needs identification.",
+      "*U62 (22)": "Anonymous block — needs identification.",
+      "dff (19)": "Possibly 'diffuser' abbreviated? Needs confirmation.",
+      "PACKAGE1300 Ls (9)": "Likely packaged AC unit 1300 LPS. Needs confirmation."
+    },
+    "S2": {
+      "A$C7D194D9F (16)": "Auto-generated block — needs visual identification.",
+      "A$C00B560F2 (8)": "Auto-generated block.",
+      "A$C488B77FD (8)": "Auto-generated block.",
+      "A$C47AA2812 (8)": "Auto-generated block.",
+      "M-LAE (2)": "Mechanical layer entity? Needs identification.",
+      "CO (2)": "Possibly CO sensor/detector? Needs confirmation."
+    },
+    "S3": {
+      "*U27 (19)": "Anonymous block — needs visual identification.",
+      "*U13 (17)": "Anonymous block — needs visual identification.",
+      "*U7 (17)": "Anonymous block — needs visual identification.",
+      "SA (14)": "Possibly Supply Air diffuser. Needs confirmation.",
+      "MS-30 (13)": "Possibly duct silencer / sound attenuator model. Needs confirmation.",
+      "ATT (10)": "Possibly Attenuator (sound). Needs confirmation.",
+      "ADF1 (4)": "Possibly Air Diffuser model. Needs confirmation.",
+      "AR1 (4)": "Unknown — possibly air register. Needs confirmation.",
+      "DFDFF (3)": "Possibly fire damper variant? Needs confirmation."
+    },
+    "S4": {
+      "*U2164 (125)": "Highest count block in S4 — critical to identify.",
+      "*U1064 (95)": "Second highest — critical to identify.",
+      "*U1374 (45)": "Significant count — needs identification.",
+      "*U1468 (26)": "Anonymous block.",
+      "*U1063 (22)": "Anonymous block.",
+      "*U2158 (17)": "Anonymous block.",
+      "*U1467 (16)": "Anonymous block.",
+      "*U2167 (16)": "Anonymous block."
     }
   },
 
@@ -161,6 +373,18 @@
       "description": "Door air curtain.",
       "default_type": "air_curtain",
       "confidence": 0.9
+    },
+    "DIFF": {
+      "description": "Diffuser variants — block names containing DIFF are likely diffusers.",
+      "default_type": "supply_diffuser",
+      "confidence": 0.75,
+      "confidence_note": "Need to check for R/RETURN prefix to classify as return vs supply."
+    },
+    "DAMPER": {
+      "description": "Generic damper blocks.",
+      "default_type": "volume_control_damper",
+      "confidence": 0.7,
+      "confidence_note": "Could be VCD, fire damper, or motorized damper. Needs context."
     }
   },
 
@@ -198,13 +422,13 @@
       "patterns": ["PLENUM BOX", "PLENUM\\s+BOX.*SIZE"],
       "count_method": "count_occurrences",
       "confidence": 0.4,
-      "notes": "Per Nestor (Mar 12): 96 plenum boxes in S5, measured in sqm not nos. Height 0.3m x Length 1m x 96 qty = 115.2 sqm total. BOQ lists in sqm — this is a VERIFY item (unit mismatch). Engine currently finds 24 via text labels (25% of actual). Often incorporated into supply air duct quantity in conventional takeoff."
+      "notes": "Per Nestor (Mar 12): 96 plenum boxes in S5, measured in sqm not nos. Often incorporated into supply air duct quantity in conventional takeoff."
     },
     "extract_diffuser": {
-      "patterns": ["\\bEAD\\b", "\\bE\\.?A\\.?D\\b", "EXTRACT AIR DIFF", "EXTRACT.*DIFF"],
+      "patterns": ["\\bEAD\\b", "\\bE\\.?A\\.?D\\b", "EXTRACT AIR DIFF", "EXTRACT.*DIFF", "EXAUST.*DIFF"],
       "count_method": "count_occurrences",
       "confidence": 0.6,
-      "notes": "EAD = Extract Air Diffuser. Per Nestor: under AC system, these are often Return Air Diffusers (RADs). Flagged for QS review."
+      "notes": "EAD = Extract Air Diffuser. Added EXAUST pattern for misspellings found in S3. Per Nestor: under AC system, these are often Return Air Diffusers (RADs)."
     },
     "volume_control_damper": {
       "patterns": ["\\bVCD\\b", "\\bSVD\\b", "VOLUME.*DAMPER", "VOL.*CTRL.*DAMPER"],
@@ -217,6 +441,18 @@
       "count_method": "special_flex_duct",
       "confidence": 0.4,
       "notes": "Per Nestor: quantified as max 1m per air terminal, with diameters 150/200/250/300mm."
+    },
+    "linear_slot_diffuser": {
+      "patterns": ["LINEAR.*SLOT", "SLOT.*DIFF", "\\bLSD\\b", "L\\.?S\\.?D\\b", "LINEAR.*DIFF"],
+      "count_method": "count_occurrences",
+      "confidence": 0.6,
+      "notes": "Added in v1.1. S2 and S3 BOQs both list linear slot diffusers. S2 has flow bar slot diffusers, S3 has 'Leniar slot diffuser' (sic). This catches text-based references."
+    },
+    "disk_valve": {
+      "patterns": ["DISK\\s*VALVE", "DISC\\s*VALVE", "150.*DISK"],
+      "count_method": "count_occurrences",
+      "confidence": 0.7,
+      "notes": "Added in v1.1. S1 and S3 BOQs list 150mm disk valves for toilet exhaust. Maps to extract_diffuser category."
     }
   },
 

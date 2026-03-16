@@ -68,6 +68,29 @@ BOQ_KEYWORD_MAP = [
 # Units that can be compared directly (countable items)
 COUNTABLE_UNITS = {'nos.', 'nos', 'no.', 'no', 'pcs', 'pcs.', 'ea', 'ea.', 'each', 'set', 'sets'}
 
+# Trace ID prefix map: equipment_type → category prefix for TQ-[CAT]-[NNN] format
+TRACE_PREFIX_MAP = {
+    'supply_duct': 'DUCT', 'return_duct': 'DUCT', 'exhaust_duct': 'DUCT',
+    'volume_control_damper': 'VCD', 'fcu': 'FCU',
+    'supply_diffuser': 'DIFF', 'return_diffuser': 'DIFF', 'extract_diffuser': 'DIFF',
+    'flow_bar': 'FLOW', 'thermostat': 'THERM', 'vrf': 'VRF',
+    'flexible_duct': 'FLEX', 'plenum_box': 'PLEN',
+    'drain_pipe': 'PIPE', 'refrigerant_pipe': 'PIPE',
+    'sound_attenuator': 'ACOU', 'fire_damper': 'DAMP', 'motorized_damper': 'DAMP',
+    'non_return_damper': 'DAMP', 'indoor_unit': 'FCU', 'outdoor_unit': 'VRF',
+    'exhaust_fan': 'FAN', 'grille': 'DIFF', 'insulation': 'MISC',
+    'access_door': 'MISC', 'damper_general': 'DAMP', 'hvac_equipment': 'EQUIP',
+}
+
+# Estimated UAE HVAC unit rates (AED) for missing-from-BOQ exposure calculation
+UAE_UNIT_RATES = {
+    'fcu': 2500, 'supply_diffuser': 180, 'return_diffuser': 180,
+    'extract_diffuser': 200, 'volume_control_damper': 350, 'thermostat': 150,
+    'vrf': 45000, 'flow_bar': 120, 'plenum_box': 280, 'indoor_unit': 2500,
+    'outdoor_unit': 55000, 'fire_damper': 450, 'motorized_damper': 800,
+    'sound_attenuator': 600, 'exhaust_fan': 3500, 'flexible_duct': 85,
+}
+
 
 def _detect_boq_columns(ws):
     """
@@ -192,13 +215,21 @@ def parse_boq(file_bytes, filename):
 def compare_boq_vs_drawing(boq_items, drawing_merged):
     """
     Compare BOQ line items against drawing detection results.
-    Returns (comparisons, missing_from_boq) with Trace IDs assigned.
+    Returns (comparisons, missing_from_boq) with category-based Trace IDs.
+    Status labels: MATCH, DISCREPANCY only (no risk levels).
+    Items appear in BOQ order (first-seen equipment type order).
     """
     comparisons = []
-    trace_counter = 0
+    trace_counters = {}  # per-category counters for TQ-[CAT]-[NNN]
 
-    # Group BOQ items by equipment type
+    def _make_trace_id(etype):
+        prefix = TRACE_PREFIX_MAP.get(etype, 'EQUIP')
+        trace_counters[prefix] = trace_counters.get(prefix, 0) + 1
+        return f"TQ-{prefix}-{trace_counters[prefix]:03d}"
+
+    # Group BOQ items by equipment type, preserving first-seen order
     boq_by_type = {}
+    boq_type_order = []  # preserves BOQ order
     for item in boq_items:
         etype = item['equipment_type']
         if etype is None:
@@ -211,6 +242,7 @@ def compare_boq_vs_drawing(boq_items, drawing_merged):
                 'rates': [],
                 'units': set(),
             }
+            boq_type_order.append(etype)
         boq_by_type[etype]['total_qty'] += item['qty']
         boq_by_type[etype]['items'].append(item)
         if item.get('total'):
@@ -220,10 +252,10 @@ def compare_boq_vs_drawing(boq_items, drawing_merged):
         if item.get('unit'):
             boq_by_type[etype]['units'].add(item['unit'].strip().lower())
 
-    # Build comparison for each BOQ equipment type
+    # Build comparison for each BOQ equipment type — IN BOQ ORDER
     matched_drawing_types = set()
 
-    for etype in sorted(boq_by_type.keys()):
+    for etype in boq_type_order:
         boq_data = boq_by_type[etype]
         drawing_data = drawing_merged.get(etype, {})
         matched_drawing_types.add(etype)
@@ -240,50 +272,45 @@ def compare_boq_vs_drawing(boq_items, drawing_merged):
         diff = drawing_qty - boq_qty if drawing_qty > 0 else 0
         exposure = abs(diff) * avg_rate if avg_rate and drawing_qty > 0 else 0
 
-        # Determine risk level
-        if has_non_countable and drawing_qty == 0:
-            risk = 'VERIFY'
-            note = _build_verify_note(etype, boq_data, units)
-        elif drawing_qty == 0 and boq_qty > 0:
-            risk = 'VERIFY'
-            note = f"BOQ has {int(boq_qty)} but not detected in drawing. May require manual check."
-        elif diff == 0:
-            risk = 'MATCH'
-            note = "Quantities match."
-        elif has_non_countable:
-            risk = 'VERIFY'
-            note = _build_verify_note(etype, boq_data, units)
-        elif abs(diff) / max(boq_qty, 1) > 0.2:
-            risk = 'HIGH'
-            note = _build_discrepancy_note(etype, boq_data, drawing_data, diff)
-        elif abs(diff) / max(boq_qty, 1) > 0.1:
-            risk = 'MEDIUM'
-            note = _build_discrepancy_note(etype, boq_data, drawing_data, diff)
-        elif diff != 0:
-            risk = 'LOW'
-            note = _build_discrepancy_note(etype, boq_data, drawing_data, diff)
+        # Determine status — ONLY MATCH or DISCREPANCY (no risk levels)
+        is_unit_mismatch = has_non_countable
+        if diff == 0 and not is_unit_mismatch:
+            status = 'MATCH'
+            note = "Exact match."
         else:
-            risk = 'MATCH'
-            note = "Quantities match."
+            status = 'DISCREPANCY'
+            if is_unit_mismatch:
+                note = _build_unit_mismatch_note(etype, boq_data, drawing_data, units)
+            elif drawing_qty == 0:
+                note = f"BOQ has {int(boq_qty)} but not detected in drawing. Manual verification required."
+            else:
+                note = _build_discrepancy_note(etype, boq_data, drawing_data, diff)
 
         boq_breakdown = _format_boq_breakdown(boq_data['items'])
         name = _format_equipment_name(etype)
         source_label = _format_source_label(source)
+        trace_id = _make_trace_id(etype)
 
-        # For VERIFY items with non-countable units, don't show misleading diff/exposure
-        is_verify_non_countable = risk == 'VERIFY' and has_non_countable
-        if is_verify_non_countable:
-            show_diff = '—'
-            show_exposure = '—'
+        # Always show drawing qty — even for unit mismatches, show entity count
+        if drawing_qty > 0:
+            if is_unit_mismatch:
+                show_drawing_qty = f"{int(drawing_qty)} entities"
+            else:
+                show_drawing_qty = int(drawing_qty)
+            show_diff = f"{int(diff):+d}" if not is_unit_mismatch else '—'
+            variance_pct = f"{abs(diff) / max(boq_qty, 1) * 100:.0f}%" if not is_unit_mismatch and boq_qty > 0 else '—'
         else:
-            show_diff = f"{int(diff):+d}" if drawing_qty > 0 else '—'
-            show_exposure = f"{exposure:,.0f}" if exposure > 0 else '—'
+            show_drawing_qty = 'Not Detected'
+            show_diff = '—'
+            variance_pct = '—'
 
-        show_drawing_qty = int(drawing_qty) if drawing_qty > 0 else '—'
-
-        # Assign trace ID
-        trace_counter += 1
-        trace_id = f"TQ-{trace_counter:03d}"
+        # Only show exposure for DISCREPANCY items (0% tolerance — exact match only)
+        if status == 'DISCREPANCY' and exposure > 0 and not is_unit_mismatch:
+            show_exposure = f"{exposure:,.0f}"
+        else:
+            show_exposure = '—'
+            if status == 'MATCH':
+                exposure = 0  # zero out exposure for match items
 
         comparisons.append({
             'Trace ID': trace_id,
@@ -291,36 +318,47 @@ def compare_boq_vs_drawing(boq_items, drawing_merged):
             'BOQ Qty': int(boq_qty) if boq_qty == int(boq_qty) else f"{boq_qty:,.1f}",
             'Drawing Qty': show_drawing_qty,
             'Difference': show_diff,
+            'Variance %': variance_pct,
             'Unit': ', '.join(sorted(units)) if units else '—',
-            'Risk': risk,
+            'Risk': status,  # field name kept for backwards compat; values are MATCH/DISCREPANCY only
             'Exposure (AED)': show_exposure,
             'Notes': note,
             'BOQ Breakdown': boq_breakdown,
             'Detection Source': source_label,
-            '_exposure_num': exposure if not is_verify_non_countable else None,
+            '_exposure_num': exposure if not is_unit_mismatch else 0,
             '_boq_qty': boq_qty,
             '_drawing_qty': drawing_qty if drawing_qty > 0 else None,
-            '_diff': diff if not is_verify_non_countable else None,
+            '_diff': diff if not is_unit_mismatch else None,
             '_rate': avg_rate,
+            '_is_unit_mismatch': is_unit_mismatch,
+            '_equipment_type': etype,
         })
 
     # Missing from BOQ: items in drawing but not in any BOQ type
     missing_from_boq = []
     for etype, data in sorted(drawing_merged.items()):
         if etype not in matched_drawing_types and data.get('count', 0) > 0:
-            trace_counter += 1
-            trace_id = f"TQ-{trace_counter:03d}"
+            trace_id = _make_trace_id(etype) if etype in TRACE_PREFIX_MAP else f"TQ-MISS-{trace_counters.get('MISS', 0) + 1:03d}"
+            if etype not in TRACE_PREFIX_MAP:
+                trace_counters['MISS'] = trace_counters.get('MISS', 0) + 1
             name = _format_equipment_name(etype)
             source = data.get('source', 'unknown')
             source_label = _format_source_label(source)
             confidence = data.get('confidence', 0)
+            qty = data['count']
+            unit_rate = UAE_UNIT_RATES.get(etype, 0)
+            est_exposure = qty * unit_rate
+
             missing_from_boq.append({
                 'Trace ID': trace_id,
                 'Equipment': name,
-                'Drawing Qty': data['count'],
+                'Drawing Qty': qty,
                 'Detection': source_label,
                 'Confidence': f"{int(confidence * 100)}%",
                 'Notes': f"Found in drawing via {source_label.lower()} but no matching BOQ line item.",
+                '_equipment_type': etype,
+                '_unit_rate': unit_rate,
+                '_est_exposure': est_exposure,
             })
 
     return comparisons, missing_from_boq
@@ -396,16 +434,30 @@ def _build_discrepancy_note(etype, boq_data, drawing_data, diff):
     return note
 
 
-def _build_verify_note(etype, boq_data, units):
+def _build_unit_mismatch_note(etype, boq_data, drawing_data, units):
+    """Build note for items where BOQ units differ from TraceQ entity count."""
     unit_list = ', '.join(sorted(units))
     boq_qty = boq_data['total_qty']
+    drawing_qty = drawing_data.get('count', 0)
+    source = drawing_data.get('source', 'detection')
+    source_label = _format_source_label(source).lower()
+
+    if drawing_qty > 0:
+        base = f"BOQ = {boq_qty:,.1f} {unit_list}. TraceQ found {int(drawing_qty)} entities via {source_label}."
+    else:
+        base = f"BOQ = {boq_qty:,.1f} {unit_list}. Not detected in drawing."
 
     if any(u.strip('.') in ('sqm', 'sq.m', 'sq m', 'm2', 'sqft') for u in units):
-        return f"BOQ quantity is in area ({unit_list}) = {boq_qty:,.1f}. Cannot compare directly with drawing count. Manual verification required."
+        base += " BOQ measured in area — duct schedule comparison recommended."
     elif any(u.strip('.') in ('mtrs', 'mtr', 'm', 'lm', 'rm') for u in units):
-        return f"BOQ quantity is in length ({unit_list}) = {boq_qty:,.1f}. Cannot compare directly with drawing count. Manual verification required."
-    else:
-        return f"Unit mismatch ({unit_list}). BOQ qty = {boq_qty:,.1f}. Needs human review."
+        base += " BOQ measured in length — direct entity comparison not possible."
+
+    return base
+
+
+def _build_verify_note(etype, boq_data, units):
+    """Legacy function — kept for backwards compatibility."""
+    return _build_unit_mismatch_note(etype, boq_data, {}, units)
 
 
 # ─── Excel Report Generator ──────────────────────────────────────────────────
@@ -515,6 +567,7 @@ def generate_nestor_feedback(comparisons, missing_from_boq, merged, drawing_name
         risk = comp['Risk']
         boq_qty = comp.get('_boq_qty', 0)
         dwg_qty = comp.get('_drawing_qty')
+        is_unit_mismatch = comp.get('_is_unit_mismatch', False)
 
         boq_str = f"{boq_qty:,}" if isinstance(boq_qty, (int, float)) else str(boq_qty)
         dwg_str = f"{dwg_qty:,}" if isinstance(dwg_qty, (int, float)) and dwg_qty else str(dwg_qty or '—')
@@ -523,7 +576,7 @@ def generate_nestor_feedback(comparisons, missing_from_boq, merged, drawing_name
             text = f"{equip}:  TraceQ = {dwg_str},  BOQ = {boq_str}"
             font = match_font
             hint = None
-        elif risk == 'VERIFY':
+        elif is_unit_mismatch:
             unit = comp.get('Unit', '')
             if dwg_qty and dwg_qty != '—':
                 text = f"{equip}:  TraceQ = {dwg_str},  BOQ = {boq_str} {unit}"
@@ -531,9 +584,11 @@ def generate_nestor_feedback(comparisons, missing_from_boq, merged, drawing_name
                 text = f"{equip}:  not detected,  BOQ = {boq_str} {unit}"
             font = normal_font
             hint = f"BOQ in {unit} — can't compare directly" if unit and unit != 'nos.' else None
-        elif risk in ('HIGH', 'MEDIUM', 'LOW'):
+        elif risk == 'DISCREPANCY':
             text = f"{equip}:  TraceQ = {dwg_str},  BOQ = {boq_str}"
-            font = issue_font if risk == 'HIGH' else normal_font
+            diff = comp.get('_diff', 0) or 0
+            pct = abs(diff) / max(boq_qty, 1) if boq_qty > 0 else 0
+            font = issue_font if pct > 0.2 else normal_font
             hint = None
         else:
             continue
@@ -594,7 +649,7 @@ def generate_nestor_feedback(comparisons, missing_from_boq, merged, drawing_name
     for comp in comparisons:
         risk = comp['Risk']
         equip = comp['Equipment']
-        equip_key = equip.lower().replace(' ', '_')
+        equip_key = comp.get('_equipment_type', equip.lower().replace(' ', '_'))
         merged_data = merged.get(equip_key, {})
 
         if merged_data.get('needs_review'):
@@ -603,12 +658,16 @@ def generate_nestor_feedback(comparisons, missing_from_boq, merged, drawing_name
                 f"{equip}: Layer={alt.get('tier1', 0)}, Block={alt.get('tier2', 0)}, "
                 f"Text={alt.get('tier3', 0)} — which count is correct?"
             )
-        elif risk == 'HIGH':
-            dwg = comp.get('_drawing_qty', '?')
-            boq = comp.get('_boq_qty', '?')
-            auto_questions.append(
-                f"{equip}: TraceQ found {dwg} but BOQ has {boq} — why the gap?"
-            )
+        elif risk == 'DISCREPANCY' and not comp.get('_is_unit_mismatch', False):
+            diff = comp.get('_diff', 0) or 0
+            boq_qty = comp.get('_boq_qty', 0)
+            pct = abs(diff) / max(boq_qty, 1) if boq_qty > 0 else 0
+            if pct > 0.2:
+                dwg = comp.get('_drawing_qty', '?')
+                boq = comp.get('_boq_qty', '?')
+                auto_questions.append(
+                    f"{equip}: TraceQ found {dwg} but BOQ has {boq} — why the gap?"
+                )
 
     if auto_questions:
         row += 1
@@ -638,333 +697,481 @@ def generate_nestor_feedback(comparisons, missing_from_boq, merged, drawing_name
 
 def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name, boq_name, merged=None, dedup_report=None):
     """
-    Generate a professional Excel BOQ Discrepancy Report with 4 tabs:
-      Tab 1: Executive Summary
-      Tab 2: Discrepancy Details
-      Tab 3: Items Not in BOQ
-      Tab 4: Detection Audit (three-tier counts, review flags, dedup)
+    Generate a professional Excel BOQ Risk Analysis Report per TraceQ_Report_Format_Spec.
+    3-tab client report:
+      Tab 1: Executive Summary (stats bar, top findings, total AED exposure)
+      Tab 2: BOQ Comparison (BOQ order, all items, AED totals row)
+      Tab 3: Missing from BOQ (context one-liner, exposure, disclaimer)
     Returns bytes of the .xlsx file.
     """
     wb = openpyxl.Workbook()
 
-    # Styles
-    header_font = Font(name='Arial', bold=True, size=11, color='FFFFFF')
-    header_fill = PatternFill('solid', fgColor='1A1A2E')
-    title_font = Font(name='Arial', bold=True, size=16, color='1A1A2E')
-    subtitle_font = Font(name='Arial', bold=False, size=10, color='666666')
+    # ═══ STYLES (per Format Spec) ═══════════════════════════════════════════
+    navy = '002060'
+    dark_blue = '1F4E79'
+    col_header_blue = '4472C4'
+    section_bg = 'D6E4F0'
+    match_bg = 'E2EFDA'
+    match_text = '375623'
+    discrep_bg = 'FCE4EC'
+    discrep_text = 'C62828'
+    missing_bg = 'FFF3E0'
+    missing_text = 'E65100'
+    alt_row_bg = 'F2F2F2'
+    border_color = 'D9D9D9'
+
+    banner_font = Font(name='Arial', bold=True, size=18, color='FFFFFF')
+    sub_banner_font = Font(name='Arial', italic=True, size=10, color='FFFFFF')
+    title_font = Font(name='Arial', bold=True, size=14, color=navy)
+    subtitle_font = Font(name='Arial', size=10, color='666666')
     bold_font = Font(name='Arial', bold=True, size=10)
-    bold_font_big = Font(name='Arial', bold=True, size=11)
+    bold_font_big = Font(name='Arial', bold=True, size=12)
     normal_font = Font(name='Arial', size=10)
-    match_fill = PatternFill('solid', fgColor='D4EDDA')
-    high_fill = PatternFill('solid', fgColor='F8D7DA')
-    high_font = Font(name='Arial', size=10, bold=True, color='DC3545')
-    medium_fill = PatternFill('solid', fgColor='FFF3CD')
-    low_fill = PatternFill('solid', fgColor='D1ECF1')
-    verify_fill = PatternFill('solid', fgColor='E8DAEF')
-    missing_fill = PatternFill('solid', fgColor='FADBD8')
-    section_fill = PatternFill('solid', fgColor='F0F0F0')
+    notes_font = Font(name='Arial', size=9, color='555555')
+    trace_font = Font(name='Arial', bold=True, size=8, color=dark_blue)
+    aed_font = Font(name='Arial', bold=True, size=10, color=discrep_text)
+    aed_big_font = Font(name='Arial', bold=True, size=16, color=discrep_text)
+    disclaimer_font = Font(name='Arial', italic=True, size=8, color='888888')
+
+    col_header_font = Font(name='Arial', bold=True, size=10, color='FFFFFF')
+    col_header_fill = PatternFill('solid', fgColor=col_header_blue)
+    navy_fill = PatternFill('solid', fgColor=navy)
+    dark_blue_fill = PatternFill('solid', fgColor=dark_blue)
+    section_fill = PatternFill('solid', fgColor=section_bg)
+    match_fill = PatternFill('solid', fgColor=match_bg)
+    discrep_fill = PatternFill('solid', fgColor=discrep_bg)
+    missing_fill = PatternFill('solid', fgColor=missing_bg)
+    alt_fill = PatternFill('solid', fgColor=alt_row_bg)
+
+    match_status_font = Font(name='Arial', bold=True, size=10, color=match_text)
+    discrep_status_font = Font(name='Arial', bold=True, size=10, color=discrep_text)
+    missing_status_font = Font(name='Arial', bold=True, size=10, color=missing_text)
+
     thin_border = Border(
-        left=Side(style='thin', color='CCCCCC'),
-        right=Side(style='thin', color='CCCCCC'),
-        top=Side(style='thin', color='CCCCCC'),
-        bottom=Side(style='thin', color='CCCCCC'),
+        left=Side(style='thin', color=border_color),
+        right=Side(style='thin', color=border_color),
+        top=Side(style='thin', color=border_color),
+        bottom=Side(style='thin', color=border_color),
     )
 
-    risk_fills = {
-        'MATCH': match_fill,
-        'HIGH': high_fill,
-        'MEDIUM': medium_fill,
-        'LOW': low_fill,
-        'VERIFY': verify_fill,
-    }
+    def _apply_border_row(ws, row_num, max_col):
+        for ci in range(1, max_col + 1):
+            ws.cell(row=row_num, column=ci).border = thin_border
 
     now = datetime.now().strftime('%d %B %Y, %H:%M')
 
-    # ─── Tab 1: Executive Summary ─────────────────────────────────────────────
+    # Truncate long multi-file drawing names
+    drawing_display = drawing_name.replace('.dxf', '').replace('.DXF', '').replace('.dwg', '').replace('.DWG', '')
+    if len(drawing_display) > 80:
+        file_count = drawing_display.count(' + ') + 1
+        first_file = drawing_display.split(' + ')[0]
+        drawing_display = f"{first_file} + {file_count - 1} more files"
+
+    # Pre-calculate stats
+    matches = sum(1 for c in comparisons if c['Risk'] == 'MATCH')
+    discrepancies = sum(1 for c in comparisons if c['Risk'] == 'DISCREPANCY')
+    missing_count = len(missing_from_boq)
+    total_items = len(comparisons)
+    comparison_exposure = sum(c.get('_exposure_num', 0) or 0 for c in comparisons)
+    missing_exposure = sum(m.get('_est_exposure', 0) or 0 for m in missing_from_boq)
+    total_exposure = comparison_exposure + missing_exposure
+
+    # ═══ TAB 1: EXECUTIVE SUMMARY ═══════════════════════════════════════════
     ws1 = wb.active
     ws1.title = "Executive Summary"
-    ws1.sheet_properties.tabColor = "1A1A2E"
+    ws1.sheet_properties.tabColor = navy
 
-    ws1['A1'] = 'TraceQ — BOQ Discrepancy Report'
-    ws1['A1'].font = title_font
-    ws1.merge_cells('A1:F1')
-    ws1['A2'] = f'Generated: {now}'
-    ws1['A2'].font = subtitle_font
-    ws1['A3'] = f'Drawing: {drawing_name}'
-    ws1['A3'].font = subtitle_font
-    ws1['A4'] = f'BOQ: {boq_name}'
-    ws1['A4'].font = subtitle_font
-    ws1['A5'] = 'Prepared by: TechTelligence | TraceQ Engine v1.0'
-    ws1['A5'].font = subtitle_font
-
-    # Summary stats
-    matches = sum(1 for c in comparisons if c['Risk'] == 'MATCH')
-    discrepancies = sum(1 for c in comparisons if c['Risk'] in ('HIGH', 'MEDIUM', 'LOW'))
-    verify_count = sum(1 for c in comparisons if c['Risk'] == 'VERIFY')
-    missing_count = len(missing_from_boq)
-    total_exposure = sum(c.get('_exposure_num', 0) or 0 for c in comparisons)
-
-    row = 7
-    c = ws1.cell(row=row, column=1, value='SUMMARY')
-    c.font = bold_font_big
-    c.fill = section_fill
+    # Navy banner
+    ws1.merge_cells('A1:F2')
+    c = ws1['A1']
+    c.value = 'TraceQ — HVAC BOQ Risk Analysis'
+    c.font = banner_font
+    c.fill = navy_fill
+    c.alignment = Alignment(horizontal='center', vertical='center')
     for ci in range(1, 7):
-        ws1.cell(row=row, column=ci).fill = section_fill
-    row += 1
+        for ri in (1, 2):
+            ws1.cell(row=ri, column=ci).fill = navy_fill
 
-    labels = [
-        ('Items Matching', matches, '#,##0'),
-        ('Discrepancies Found', discrepancies, '#,##0'),
-        ('Items Needing Verification', verify_count, '#,##0'),
-        ('Items Missing from BOQ', missing_count, '#,##0'),
-        ('Total Quantifiable Exposure (AED)', total_exposure, '#,##0'),
+    # Sub-banner
+    ws1.merge_cells('A3:F3')
+    c = ws1['A3']
+    c.value = f'Prepared by TechTelligence | {now}'
+    c.font = sub_banner_font
+    c.fill = dark_blue_fill
+    c.alignment = Alignment(horizontal='center')
+    for ci in range(1, 7):
+        ws1.cell(row=3, column=ci).fill = dark_blue_fill
+
+    # Project details
+    details = [
+        ('Drawing:', drawing_display),
+        ('BOQ:', boq_name),
+        ('Analysis Date:', now),
     ]
-    for label, val, fmt in labels:
-        ws1.cell(row=row, column=1, value=label).font = normal_font
-        c = ws1.cell(row=row, column=2, value=val)
-        c.font = bold_font
-        c.number_format = fmt
+    row = 5
+    for label, val in details:
+        ws1.cell(row=row, column=1, value=label).font = bold_font
+        ws1.cell(row=row, column=2, value=val).font = normal_font
         row += 1
 
-    # Risk breakdown table
+    # ── Stats Bar ──
     row += 1
-    c = ws1.cell(row=row, column=1, value='RISK BREAKDOWN')
-    c.font = bold_font_big
-    c.fill = section_fill
+    stats_headers = ['Total Items Reviewed', 'Matched', 'Discrepancies', 'Missing from BOQ', 'Total Est. Exposure (AED)']
+    stats_values = [total_items, matches, discrepancies, missing_count, total_exposure]
+
+    for col_idx, h in enumerate(stats_headers, 1):
+        c = ws1.cell(row=row, column=col_idx, value=h)
+        c.font = col_header_font
+        c.fill = col_header_fill
+        c.alignment = Alignment(horizontal='center', wrap_text=True)
+        c.border = thin_border
+    row += 1
+    for col_idx, v in enumerate(stats_values, 1):
+        c = ws1.cell(row=row, column=col_idx, value=v)
+        c.font = bold_font_big if col_idx < 5 else aed_font
+        c.alignment = Alignment(horizontal='center')
+        c.border = thin_border
+        if isinstance(v, (int, float)):
+            c.number_format = '#,##0'
+    row += 2
+
+    # ── Top Findings ──
+    c = ws1.cell(row=row, column=1, value='KEY FINDINGS')
+    c.font = Font(name='Arial', bold=True, size=11, color=navy)
     for ci in range(1, 7):
         ws1.cell(row=row, column=ci).fill = section_fill
+        ws1.cell(row=row, column=ci).border = thin_border
     row += 1
 
-    risk_headers = ['Trace ID', 'Equipment', 'Risk', 'BOQ Qty', 'Drawing Qty', 'Exposure (AED)']
-    for col_idx, h in enumerate(risk_headers, 1):
+    finding_headers = ['Finding', 'Status', 'Detail']
+    for col_idx, h in enumerate(finding_headers, 1):
         c = ws1.cell(row=row, column=col_idx, value=h)
-        c.font = header_font
-        c.fill = header_fill
+        c.font = col_header_font
+        c.fill = col_header_fill
         c.alignment = Alignment(horizontal='center')
         c.border = thin_border
     row += 1
 
+    # Show discrepancy items + missing items as findings
     for comp in comparisons:
         if comp['Risk'] == 'MATCH':
             continue
-        boq_val = _xl_val(comp.get('_boq_qty'))
-        dwg_val = _xl_val(comp.get('_drawing_qty'))
-        exp_val = _xl_val(comp.get('_exposure_num'))
+        exp = comp.get('_exposure_num', 0) or 0
+        detail = comp['Notes'][:120]
+        if exp > 0:
+            detail += f" Est. exposure: AED {exp:,.0f}"
 
-        vals = [comp['Trace ID'], comp['Equipment'], comp['Risk'], boq_val, dwg_val, exp_val]
-        fill = risk_fills.get(comp['Risk'], None)
-        for col_idx, v in enumerate(vals, 1):
-            c = ws1.cell(row=row, column=col_idx, value=v)
-            c.font = normal_font
-            c.border = thin_border
-            if fill:
-                c.fill = fill
-            if col_idx in (4, 5) and isinstance(v, (int, float)):
-                c.number_format = '#,##0'
-            if col_idx == 6 and isinstance(v, (int, float)):
-                c.number_format = '#,##0'
-            c.alignment = Alignment(horizontal='center') if col_idx != 2 else Alignment(horizontal='left')
+        ws1.cell(row=row, column=1, value=comp['Equipment']).font = normal_font
+        sc = ws1.cell(row=row, column=2, value='DISCREPANCY')
+        sc.font = discrep_status_font
+        sc.fill = discrep_fill
+        ws1.cell(row=row, column=3, value=detail).font = notes_font
+        ws1.cell(row=row, column=3).alignment = Alignment(wrap_text=True, vertical='top')
+        _apply_border_row(ws1, row, 3)
         row += 1
 
-    if missing_from_boq:
-        for m in missing_from_boq:
-            vals = [m['Trace ID'], m['Equipment'], 'MISSING FROM BOQ', '—', m['Drawing Qty'], '—']
-            for col_idx, v in enumerate(vals, 1):
-                c = ws1.cell(row=row, column=col_idx, value=v)
-                c.font = normal_font
-                c.border = thin_border
-                c.fill = missing_fill
-                if col_idx == 5 and isinstance(v, (int, float)):
-                    c.number_format = '#,##0'
-                c.alignment = Alignment(horizontal='center') if col_idx != 2 else Alignment(horizontal='left')
-            row += 1
+    for m in missing_from_boq:
+        exp = m.get('_est_exposure', 0) or 0
+        detail = f"{m['Drawing Qty']} found in drawing, not in BOQ."
+        if exp > 0:
+            detail += f" Est. exposure: AED {exp:,.0f}"
 
-    ws1.column_dimensions['A'].width = 35
-    ws1.column_dimensions['B'].width = 28
-    ws1.column_dimensions['C'].width = 20
+        ws1.cell(row=row, column=1, value=m['Equipment']).font = normal_font
+        sc = ws1.cell(row=row, column=2, value='MISSING FROM BOQ')
+        sc.font = missing_status_font
+        sc.fill = missing_fill
+        ws1.cell(row=row, column=3, value=detail).font = notes_font
+        ws1.cell(row=row, column=3).alignment = Alignment(wrap_text=True, vertical='top')
+        _apply_border_row(ws1, row, 3)
+        row += 1
+
+    # ── Total Estimated Financial Exposure ──
+    row += 1
+    ws1.cell(row=row, column=1, value='TOTAL ESTIMATED FINANCIAL EXPOSURE').font = bold_font_big
+    row += 1
+    c = ws1.cell(row=row, column=1, value=f'AED {total_exposure:,.0f}')
+    c.font = aed_big_font
+    row += 1
+    breakdown = f'Discrepancies: AED {comparison_exposure:,.0f}  |  Missing items: AED {missing_exposure:,.0f}'
+    ws1.cell(row=row, column=1, value=breakdown).font = normal_font
+    row += 1
+    ws1.cell(row=row, column=1, value='Estimated based on typical UAE HVAC market rates — indicative only.').font = disclaimer_font
+
+    ws1.column_dimensions['A'].width = 30
+    ws1.column_dimensions['B'].width = 22
+    ws1.column_dimensions['C'].width = 70
     ws1.column_dimensions['D'].width = 14
-    ws1.column_dimensions['E'].width = 14
-    ws1.column_dimensions['F'].width = 18
+    ws1.column_dimensions['E'].width = 22
+    ws1.column_dimensions['F'].width = 14
 
-    # ─── Tab 2: Discrepancy Details ───────────────────────────────────────────
-    ws2 = wb.create_sheet("Discrepancy Details")
-    ws2.sheet_properties.tabColor = "DC3545"
+    # ═══ TAB 2: BOQ COMPARISON ══════════════════════════════════════════════
+    ws2 = wb.create_sheet("BOQ Comparison")
+    ws2.sheet_properties.tabColor = col_header_blue
 
-    ws2['A1'] = 'BOQ vs Drawing — Detailed Comparison'
-    ws2['A1'].font = title_font
+    # Banner
     ws2.merge_cells('A1:K1')
-    ws2['A2'] = f'Drawing: {drawing_name} | BOQ: {boq_name}'
-    ws2['A2'].font = subtitle_font
+    c = ws2['A1']
+    c.value = 'BOQ vs Drawing — Detailed Comparison'
+    c.font = banner_font
+    c.fill = navy_fill
+    c.alignment = Alignment(horizontal='center', vertical='center')
+    for ci in range(1, 12):
+        ws2.cell(row=1, column=ci).fill = navy_fill
 
-    headers = ['Trace ID', 'Equipment', 'BOQ Qty', 'Drawing Qty', 'Difference', 'Unit', 'Risk', 'Exposure (AED)', 'Detection Source', 'Notes', 'BOQ Breakdown']
+    ws2.merge_cells('A2:K2')
+    c = ws2['A2']
+    c.value = f'Drawing: {drawing_display}  |  BOQ: {boq_name}  |  Date: {now}'
+    c.font = sub_banner_font
+    c.fill = dark_blue_fill
+    for ci in range(1, 12):
+        ws2.cell(row=2, column=ci).fill = dark_blue_fill
+
+    # BOQ order + tolerance note
+    ws2.merge_cells('A3:K3')
+    ws2.cell(row=3, column=1, value='Items listed in BOQ order as received from contractor. 0% tolerance — any quantity mismatch is flagged as DISCREPANCY.').font = Font(name='Arial', size=9, italic=True, color='888888')
+
+    # Column headers per format spec
+    headers2 = [
+        'Item No.', 'Description', 'Unit', 'BOQ Qty\n(Received)',
+        'TraceQ Qty\n(Drawings)', 'Variance\n(+/-)', 'Variance %',
+        'Est. Exposure\n(AED)', 'Status', 'Trace ID', 'Notes'
+    ]
     row = 4
-    for col_idx, h in enumerate(headers, 1):
+    for col_idx, h in enumerate(headers2, 1):
         c = ws2.cell(row=row, column=col_idx, value=h)
-        c.font = header_font
-        c.fill = header_fill
-        c.alignment = Alignment(horizontal='center', wrap_text=True)
+        c.font = col_header_font
+        c.fill = col_header_fill
+        c.alignment = Alignment(horizontal='center', wrap_text=True, vertical='center')
         c.border = thin_border
+    ws2.row_dimensions[row].height = 35
     row += 1
 
-    for comp in comparisons:
+    # Data rows — in BOQ order
+    item_no = 0
+    for idx, comp in enumerate(comparisons):
+        item_no += 1
+        status = comp['Risk']
+        is_alt = (idx % 2 == 1)
+
         boq_val = comp.get('_boq_qty', 0)
-        dwg_val = _xl_val(comp.get('_drawing_qty'))
-        diff_val = _xl_val(comp.get('_diff'))
-        exp_val = _xl_val(comp.get('_exposure_num'))
+        dwg_val = comp.get('Drawing Qty', '—')
+        diff_val = comp.get('Difference', '—')
+        var_pct = comp.get('Variance %', '—')
+        exp_val = comp.get('_exposure_num', 0) or 0
 
         vals = [
-            comp['Trace ID'], comp['Equipment'], boq_val, dwg_val, diff_val,
-            comp['Unit'], comp['Risk'], exp_val,
-            comp.get('Detection Source', '—'), comp['Notes'], comp.get('BOQ Breakdown', ''),
+            item_no,
+            comp['Equipment'],
+            comp['Unit'],
+            boq_val,
+            dwg_val,
+            diff_val,
+            var_pct,
+            exp_val if exp_val > 0 else '—',
+            status,
+            comp['Trace ID'],
+            comp['Notes'],
         ]
-        fill = risk_fills.get(comp['Risk'], None)
+
         for col_idx, v in enumerate(vals, 1):
             c = ws2.cell(row=row, column=col_idx, value=v)
             c.font = normal_font
             c.border = thin_border
-            if fill and col_idx == 7:
-                c.fill = fill
-            if col_idx in (3, 4, 5) and isinstance(v, (int, float)):
+
+            # Status cell formatting
+            if col_idx == 9:
+                if status == 'MATCH':
+                    c.fill = match_fill
+                    c.font = match_status_font
+                else:
+                    c.fill = discrep_fill
+                    c.font = discrep_status_font
+            elif is_alt:
+                c.fill = alt_fill
+
+            # Trace ID formatting
+            if col_idx == 10:
+                c.font = trace_font
+
+            # Notes formatting
+            if col_idx == 11:
+                c.font = notes_font
+                c.alignment = Alignment(wrap_text=True, vertical='top')
+            elif col_idx in (1, 3, 4, 5, 6, 7, 8, 9, 10):
+                c.alignment = Alignment(horizontal='center')
+            else:
+                c.alignment = Alignment(horizontal='left', wrap_text=True)
+
+            # Number formats
+            if col_idx == 4 and isinstance(v, (int, float)):
                 c.number_format = '#,##0'
             if col_idx == 8 and isinstance(v, (int, float)):
                 c.number_format = '#,##0'
-            if col_idx in (10, 11):
-                c.alignment = Alignment(wrap_text=True, vertical='top')
-            elif col_idx in (1, 3, 4, 5, 6, 7, 8):
-                c.alignment = Alignment(horizontal='center')
+                c.font = aed_font
         row += 1
 
-    detail_widths = [12, 28, 12, 14, 12, 8, 12, 16, 20, 60, 50]
-    for i, w in enumerate(detail_widths):
-        ws2.column_dimensions[get_column_letter(i + 1)].width = w
+    # ── AED Totals Row ──
+    row += 1
+    ws2.cell(row=row, column=7, value='TOTAL:').font = bold_font_big
+    ws2.cell(row=row, column=7).alignment = Alignment(horizontal='right')
+    c = ws2.cell(row=row, column=8, value=comparison_exposure)
+    c.font = Font(name='Arial', bold=True, size=12, color=discrep_text)
+    c.number_format = '#,##0'
+    c.alignment = Alignment(horizontal='center')
+    c.border = thin_border
+    _apply_border_row(ws2, row, 11)
 
-    # ─── Tab 3: Items Not in BOQ ──────────────────────────────────────────────
-    ws3 = wb.create_sheet("Not in BOQ")
-    ws3.sheet_properties.tabColor = "FD7E14"
+    # ── Trace ID Reference Section ──
+    row += 2
+    ws2.cell(row=row, column=1, value='TRACE ID REFERENCE').font = Font(name='Arial', bold=True, size=11, color=navy)
+    for ci in range(1, 12):
+        ws2.cell(row=row, column=ci).fill = section_fill
+        ws2.cell(row=row, column=ci).border = thin_border
+    row += 1
 
-    ws3['A1'] = 'Items Detected in Drawing — Not in BOQ'
-    ws3['A1'].font = title_font
-    ws3.merge_cells('A1:F1')
-    ws3['A2'] = 'These items were found in the drawing but have no corresponding BOQ line item. They may represent scope gaps or items not yet priced.'
-    ws3['A2'].font = subtitle_font
-    ws3.merge_cells('A2:F2')
-
-    headers3 = ['Trace ID', 'Equipment', 'Drawing Qty', 'Detection Method', 'Confidence', 'Notes']
-    row = 4
-    for col_idx, h in enumerate(headers3, 1):
-        c = ws3.cell(row=row, column=col_idx, value=h)
-        c.font = header_font
-        c.fill = header_fill
+    ref_headers = ['Trace ID', 'Category', 'Detection Method', 'How to Verify in AutoCAD']
+    for col_idx, h in enumerate(ref_headers, 1):
+        c = ws2.cell(row=row, column=col_idx, value=h)
+        c.font = col_header_font
+        c.fill = col_header_fill
         c.alignment = Alignment(horizontal='center')
         c.border = thin_border
     row += 1
 
+    # Add unique trace ID categories
+    seen_prefixes = set()
+    for comp in comparisons:
+        tid = comp['Trace ID']
+        prefix = '-'.join(tid.split('-')[:2])
+        if prefix in seen_prefixes:
+            continue
+        seen_prefixes.add(prefix)
+        etype = comp.get('_equipment_type', '')
+        source_label = comp.get('Detection Source', '—')
+
+        ws2.cell(row=row, column=1, value=f'{prefix}-*').font = trace_font
+        ws2.cell(row=row, column=2, value=comp['Equipment']).font = normal_font
+        ws2.cell(row=row, column=3, value=source_label).font = normal_font
+        ws2.cell(row=row, column=4, value=f'Select layer containing {etype.replace("_", " ")} entities in AutoCAD').font = notes_font
+        ws2.cell(row=row, column=4).alignment = Alignment(wrap_text=True)
+        _apply_border_row(ws2, row, 4)
+        row += 1
+
+    # Column widths
+    tab2_widths = [8, 30, 8, 14, 16, 12, 12, 16, 16, 14, 55]
+    for i, w in enumerate(tab2_widths):
+        ws2.column_dimensions[get_column_letter(i + 1)].width = w
+
+    # ═══ TAB 3: MISSING FROM BOQ ════════════════════════════════════════════
+    ws3 = wb.create_sheet("Missing from BOQ")
+    ws3.sheet_properties.tabColor = 'E65100'
+
+    # Banner
+    ws3.merge_cells('A1:H1')
+    c = ws3['A1']
+    c.value = 'Items Detected in Drawing — Not in BOQ'
+    c.font = banner_font
+    c.fill = navy_fill
+    c.alignment = Alignment(horizontal='center', vertical='center')
+    for ci in range(1, 9):
+        ws3.cell(row=1, column=ci).fill = navy_fill
+
+    # Context one-liner
+    ws3.merge_cells('A2:H2')
+    c = ws3['A2']
+    c.value = 'The following items were detected on the drawings but do not appear in the BOQ provided. These may represent unpriced scope requiring QS review.'
+    c.font = Font(name='Arial', italic=True, size=10, color='666666')
+    c.alignment = Alignment(horizontal='left')
+
+    # Column headers per format spec
+    headers3 = ['Item', 'Found In Drawing', 'Est. Qty', 'Unit Rate\n(AED)', 'Est. Exposure\n(AED)', 'Status', 'Trace ID', 'Notes']
+    row = 4
+    for col_idx, h in enumerate(headers3, 1):
+        c = ws3.cell(row=row, column=col_idx, value=h)
+        c.font = col_header_font
+        c.fill = col_header_fill
+        c.alignment = Alignment(horizontal='center', wrap_text=True, vertical='center')
+        c.border = thin_border
+    ws3.row_dimensions[row].height = 35
+    row += 1
+
     if missing_from_boq:
-        for m in missing_from_boq:
-            vals = [m['Trace ID'], m['Equipment'], m['Drawing Qty'], m['Detection'], m['Confidence'], m['Notes']]
+        for idx, m in enumerate(missing_from_boq):
+            qty = m['Drawing Qty']
+            unit_rate = m.get('_unit_rate', 0)
+            est_exp = m.get('_est_exposure', 0)
+            is_alt = (idx % 2 == 1)
+
+            vals = [
+                m['Equipment'],
+                m['Detection'],
+                f"{qty} nos.",
+                unit_rate if unit_rate > 0 else '—',
+                est_exp if est_exp > 0 else '—',
+                'MISSING FROM BOQ',
+                m['Trace ID'],
+                m['Notes'],
+            ]
+
             for col_idx, v in enumerate(vals, 1):
                 c = ws3.cell(row=row, column=col_idx, value=v)
                 c.font = normal_font
                 c.border = thin_border
-                c.fill = missing_fill
-                if col_idx == 3 and isinstance(v, (int, float)):
-                    c.number_format = '#,##0'
+
                 if col_idx == 6:
+                    c.fill = missing_fill
+                    c.font = missing_status_font
+                elif is_alt:
+                    c.fill = alt_fill
+
+                if col_idx == 7:
+                    c.font = trace_font
+                if col_idx == 8:
+                    c.font = notes_font
                     c.alignment = Alignment(wrap_text=True, vertical='top')
+                elif col_idx in (3, 4, 5, 6, 7):
+                    c.alignment = Alignment(horizontal='center')
                 else:
-                    c.alignment = Alignment(horizontal='center') if col_idx != 2 else Alignment(horizontal='left')
+                    c.alignment = Alignment(horizontal='left')
+
+                if col_idx in (4, 5) and isinstance(v, (int, float)):
+                    c.number_format = '#,##0'
+                    if col_idx == 5:
+                        c.font = aed_font
             row += 1
+
+        # Totals row
+        row += 1
+        ws3.cell(row=row, column=4, value='MISSING ITEMS TOTAL:').font = bold_font_big
+        ws3.cell(row=row, column=4).alignment = Alignment(horizontal='right')
+        c = ws3.cell(row=row, column=5, value=missing_exposure)
+        c.font = Font(name='Arial', bold=True, size=12, color=discrep_text)
+        c.number_format = '#,##0'
+        c.alignment = Alignment(horizontal='center')
+        c.border = thin_border
+
+        # Maths breakdown (missing items only — combined total lives on Exec Summary)
+        row += 1
+        ws3.cell(row=row, column=3, value='Missing items total only. See Executive Summary for combined exposure.').font = Font(name='Arial', size=9, italic=True, color='888888')
+
     else:
         ws3.cell(row=row, column=1, value='No items missing from BOQ.').font = normal_font
 
-    not_in_boq_widths = [12, 28, 14, 20, 12, 60]
-    for i, w in enumerate(not_in_boq_widths):
+    # Disclaimer
+    row += 2
+    ws3.merge_cells(f'A{row}:H{row}')
+    disclaimer = (
+        'Unit rates are estimated based on typical UAE HVAC market pricing for indicative purposes only. '
+        'Actual costs must be confirmed with project-specific quotations. This report highlights potential '
+        'discrepancies for QS review — it does not constitute a formal quantity takeoff or financial advice.'
+    )
+    c = ws3.cell(row=row, column=1, value=disclaimer)
+    c.font = disclaimer_font
+    c.alignment = Alignment(wrap_text=True)
+
+    tab3_widths = [22, 22, 12, 14, 16, 20, 14, 50]
+    for i, w in enumerate(tab3_widths):
         ws3.column_dimensions[get_column_letter(i + 1)].width = w
-
-    # ─── Tab 4: Detection Audit ──────────────────────────────────────────────
-    if merged:
-        ws4 = wb.create_sheet("Detection Audit")
-        ws4.sheet_properties.tabColor = "0066CC"
-
-        ws4['A1'] = 'Detection Tier Audit — Three-Tier Breakdown'
-        ws4['A1'].font = title_font
-        ws4.merge_cells('A1:H1')
-        ws4['A2'] = 'Shows what each detection tier found. Review flags indicate significant disagreements requiring QS verification.'
-        ws4['A2'].font = subtitle_font
-        ws4.merge_cells('A2:H2')
-
-        review_fill = PatternFill('solid', fgColor='FFF3CD')
-
-        headers4 = ['Equipment', 'Final Count', 'Source', 'Confidence', 'Layer (T1)', 'Block (T2)', 'Text (T3)', 'Status']
-        row = 4
-        for col_idx, h in enumerate(headers4, 1):
-            c = ws4.cell(row=row, column=col_idx, value=h)
-            c.font = header_font
-            c.fill = header_fill
-            c.alignment = Alignment(horizontal='center')
-            c.border = thin_border
-        row += 1
-
-        for equip_type in sorted(merged.keys()):
-            data = merged[equip_type]
-            alt = data.get('alternate_counts', {})
-            source = data.get('source', '')
-            if 'tier1' in source:
-                src_label = 'Layer'
-            elif 'tier2' in source:
-                src_label = 'Block'
-            elif 'tier3' in source:
-                src_label = 'Text'
-            else:
-                src_label = source
-
-            flagged = data.get('needs_review', False)
-            t1 = alt.get('tier1', 0)
-            t2 = alt.get('tier2', 0)
-            t3 = alt.get('tier3', 0)
-
-            vals = [
-                _format_equipment_name(equip_type),
-                data.get('count', 0),
-                src_label,
-                f"{int(data.get('confidence', 0) * 100)}%",
-                t1 if t1 > 0 else '—',
-                t2 if t2 > 0 else '—',
-                t3 if t3 > 0 else '—',
-                'REVIEW' if flagged else 'OK',
-            ]
-            for col_idx, v in enumerate(vals, 1):
-                c = ws4.cell(row=row, column=col_idx, value=v)
-                c.font = normal_font
-                c.border = thin_border
-                if flagged:
-                    c.fill = review_fill
-                if col_idx in (2, 5, 6, 7) and isinstance(v, (int, float)):
-                    c.number_format = '#,##0'
-                c.alignment = Alignment(horizontal='center') if col_idx != 1 else Alignment(horizontal='left')
-            row += 1
-
-        # Dedup section
-        if dedup_report:
-            adjustments = dedup_report.get('adjustments', [])
-            if adjustments:
-                row += 1
-                ws4.cell(row=row, column=1, value='PROXIMITY DEDUPLICATION').font = bold_font_big
-                ws4.cell(row=row, column=1).fill = section_fill
-                for ci in range(1, 9):
-                    ws4.cell(row=row, column=ci).fill = section_fill
-                row += 1
-                ws4.cell(row=row, column=1, value=f"Radius: {dedup_report.get('radius_used', 0):.0f} units").font = normal_font
-                row += 1
-                for adj in adjustments:
-                    ws4.cell(row=row, column=1, value=_format_equipment_name(adj.get('equipment_type', ''))).font = normal_font
-                    ws4.cell(row=row, column=2, value=f"T3: {adj.get('tier3_original', 0)} → {adj.get('tier3_adjusted', 0)}").font = normal_font
-                    ws4.cell(row=row, column=3, value=f"-{adj.get('shadowed_by_blocks', 0)} shadowed").font = normal_font
-                    row += 1
-
-        audit_widths = [28, 14, 12, 12, 14, 14, 14, 12]
-        for i, w in enumerate(audit_widths):
-            ws4.column_dimensions[get_column_letter(i + 1)].width = w
 
     # Save to bytes
     output = io.BytesIO()
@@ -1443,18 +1650,19 @@ else:
 
                     # ── Summary Metrics ──
                     matches = sum(1 for c in comparisons if c['Risk'] == 'MATCH')
-                    discrepancies = sum(1 for c in comparisons if c['Risk'] in ('HIGH', 'MEDIUM', 'LOW'))
-                    verify_items = sum(1 for c in comparisons if c['Risk'] == 'VERIFY')
+                    discrepancies = sum(1 for c in comparisons if c['Risk'] == 'DISCREPANCY')
                     missing_count = len(missing_from_boq)
-                    total_exposure = sum(c.get('_exposure_num') or 0 for c in comparisons)
+                    comparison_exp = sum(c.get('_exposure_num') or 0 for c in comparisons)
+                    missing_exp = sum(m.get('_est_exposure') or 0 for m in missing_from_boq)
+                    total_exposure = comparison_exp + missing_exp
 
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
-                        st.metric("Matching", matches)
+                        st.metric("Matched", matches)
                     with col2:
                         st.metric("Discrepancies", discrepancies)
                     with col3:
-                        st.metric("Needs Verification", verify_items)
+                        st.metric("Missing from BOQ", missing_count)
                     with col4:
                         st.metric("Total Exposure", f"AED {total_exposure:,.0f}")
 
@@ -1504,7 +1712,7 @@ else:
                             'Drawing Qty': c['Drawing Qty'],
                             'Diff': c['Difference'],
                             'Unit': c['Unit'],
-                            'Risk': c['Risk'],
+                            'Status': c['Risk'],
                             'Exposure (AED)': c['Exposure (AED)'],
                             'Notes': c['Notes'],
                         })
@@ -1520,7 +1728,7 @@ else:
                             "Drawing Qty": st.column_config.TextColumn("Drawing", width="small"),
                             "Diff": st.column_config.TextColumn("Diff", width="small"),
                             "Unit": st.column_config.TextColumn("Unit", width="small"),
-                            "Risk": st.column_config.TextColumn("Risk", width="small"),
+                            "Status": st.column_config.TextColumn("Status", width="small"),
                             "Exposure (AED)": st.column_config.TextColumn("Exposure", width="small"),
                             "Notes": st.column_config.TextColumn("Notes", width="large"),
                         }
