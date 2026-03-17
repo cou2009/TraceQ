@@ -91,6 +91,23 @@ UAE_UNIT_RATES = {
     'sound_attenuator': 600, 'exhaust_fan': 3500, 'flexible_duct': 85,
 }
 
+# Expected detection method per equipment type — used in Trace ID reference
+# when engine didn't detect the item (source = '—')
+EXPECTED_DETECTION_METHOD = {
+    'supply_duct': 'Layer Detection', 'return_duct': 'Layer Detection', 'exhaust_duct': 'Layer Detection',
+    'volume_control_damper': 'Layer Detection', 'fcu': 'Block Detection',
+    'supply_diffuser': 'Layer Detection', 'return_diffuser': 'Block Detection',
+    'extract_diffuser': 'Text/Label Detection', 'thermostat': 'Layer Detection',
+    'flow_bar': 'Text/Label Detection', 'vrf': 'Text/Label Detection',
+    'flexible_duct': 'Layer Detection', 'plenum_box': 'Text/Label Detection',
+    'indoor_unit': 'Block Detection', 'outdoor_unit': 'Block Detection',
+    'fire_damper': 'Block Detection', 'motorized_damper': 'Block Detection',
+    'non_return_damper': 'Block Detection', 'sound_attenuator': 'Block Detection',
+    'exhaust_fan': 'Block Detection', 'grille': 'Block Detection',
+    'insulation': 'Layer Detection', 'access_door': 'Block Detection',
+    'drain_pipe': 'Layer Detection', 'refrigerant_pipe': 'Layer Detection',
+}
+
 
 def _detect_boq_columns(ws):
     """
@@ -264,17 +281,19 @@ def compare_boq_vs_drawing(boq_items, drawing_merged):
         drawing_qty = drawing_data.get('count', 0)
         source = drawing_data.get('source', '—')
         rates = boq_data['rates']
-        avg_rate = sum(rates) / len(rates) if rates else 0
+        avg_rate = sum(rates) / len(rates) if rates else UAE_UNIT_RATES.get(etype, 0)
         units = boq_data['units']
 
         has_non_countable = any(u.strip('.') not in ('nos', 'no', 'pcs', 'ea', 'each', 'set', 'sets') for u in units)
 
-        diff = drawing_qty - boq_qty if drawing_qty > 0 else 0
-        exposure = abs(diff) * avg_rate if avg_rate and drawing_qty > 0 else 0
+        diff = drawing_qty - boq_qty
+        exposure = abs(diff) * avg_rate if avg_rate and diff != 0 else 0
 
         # Determine status — ONLY MATCH or DISCREPANCY (no risk levels)
+        # 0% tolerance: only exact match (diff == 0 AND drawing actually detected) = MATCH
+        # If drawing_qty == 0 and boq_qty > 0, that's NOT a match — it's not detected
         is_unit_mismatch = has_non_countable
-        if diff == 0 and not is_unit_mismatch:
+        if diff == 0 and drawing_qty > 0 and not is_unit_mismatch:
             status = 'MATCH'
             note = "Exact match."
         else:
@@ -1048,6 +1067,9 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
         seen_prefixes.add(prefix)
         etype = comp.get('_equipment_type', '')
         source_label = comp.get('Detection Source', '—')
+        # Fallback to expected detection method from config when engine didn't detect
+        if source_label in ('—', '', None):
+            source_label = EXPECTED_DETECTION_METHOD.get(etype, '—')
 
         ws2.cell(row=row, column=1, value=f'{prefix}-*').font = trace_font
         ws2.cell(row=row, column=2, value=comp['Equipment']).font = normal_font
