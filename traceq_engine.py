@@ -611,7 +611,12 @@ class LayerClassifier:
 
             if hits > 0:
                 # Score = proportion of keywords matched, weighted by specificity
-                score = min(hits / max(len(keywords), 1), 1.0)
+                proportion = min(hits / max(len(keywords), 1), 1.0)
+                # Specificity bonus: categories with more keywords are more
+                # specific, so give a bonus per absolute hit to prefer specific
+                # categories over generic catch-alls when both match.
+                hit_bonus = hits * 0.10
+                score = min(proportion + hit_bonus, 1.0)
                 # Bonus for HVAC-prefixed layers (more likely to be equipment)
                 if 'HVAC' in upper or upper.startswith('M-'):
                     score = min(score + 0.15, 1.0)

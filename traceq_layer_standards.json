@@ -1,72 +1,73 @@
 {
-  "_version": "1.0",
-  "_source": "Nestor NHM layer standards + HVAC layer standards (March 2026)",
-  "_notes": "Fuzzy matching uses keywords array. Exact match checked first, then keyword tokens.",
+  "_version": "1.2",
+  "_source": "Nestor NHM layer standards + HVAC layer standards + Nestor feedback March 20 (25 new abbreviations)",
+  "_notes": "Fuzzy matching uses keywords array. Exact match checked first, then keyword tokens. IMPORTANT: 2-letter keywords removed in v1.2 — they caused false layer classifications.",
+  "_changelog": "v1.2 (Mar 20): Removed all problematic 2-letter keywords (SD, RD, ED, VD, MD, TH, EF, SF, RF, BF, SA, EA, RA) that caused layer misclassification regression. Kept 3+ letter Nestor abbreviations (SLSD, RLSD, MSD, OBD, PBD, etc.).",
 
   "equipment_categories": {
     "supply_diffuser": {
       "description": "Supply air diffusers (ceiling/wall mounted)",
-      "exact_layers": ["HVAC-Diff-Supply", "HVAC-SUPPLY AIR OUTLET", "M-S DIFFUSER", "M-SUPPLY AIR DIFUSER"],
-      "keywords": ["SUPPLY", "DIFF", "SAD", "SALD", "DIFUSER"],
+      "exact_layers": ["HVAC-Diff-Supply", "HVAC-SUPPLY AIR OUTLET", "M-S DIFFUSER", "M-SUPPLY AIR DIFUSER", "M-DIFF-SUPP", "M-HVAC-DIFF-S", "MEP-DIFFUSER-SUPPLY", "M_DIFF_SUPPLY"],
+      "keywords": ["SUPPLY", "DIFF", "SAD", "SALD", "DIFUSER", "SLSD", "SQD"],
       "exclude_keywords": ["DUCT", "PIPE", "VOLUME"]
     },
     "return_diffuser": {
       "description": "Return air diffusers (ceiling/wall mounted)",
-      "exact_layers": ["HVAC-Diff-Return", "HVAC-RETURN AIR OUTLET", "M-R DIFFUSER"],
-      "keywords": ["RETURN", "DIFF", "RAD", "RALD"],
+      "exact_layers": ["HVAC-Diff-Return", "HVAC-RETURN AIR OUTLET", "M-R DIFFUSER", "M-DIFF-RETN", "M-HVAC-DIFF-R", "MEP-DIFFUSER-RETURN", "M_DIFF_RETURN"],
+      "keywords": ["RETURN", "DIFF", "RAD", "RALD", "RLSD"],
       "exclude_keywords": ["DUCT", "PIPE"]
     },
     "extract_diffuser": {
       "description": "Extract/exhaust air diffusers",
-      "exact_layers": ["HVAC-Diff-Extract", "HVAC-EACD"],
-      "keywords": ["EXTRACT", "EXHAUST", "DIFF"],
+      "exact_layers": ["HVAC-Diff-Extract", "HVAC-EACD", "M-DIFF-EXTR", "M-HVAC-DIFF-E", "MEP-DIFFUSER-EXHAUST", "M_DIFF_EXTRACT"],
+      "keywords": ["EXTRACT", "EXHAUST", "DIFF", "EAG"],
       "exclude_keywords": ["DUCT", "EQUIP", "FAN"]
     },
     "grille": {
       "description": "Grilles and registers (general)",
       "exact_layers": ["M-DIFGRL"],
-      "keywords": ["GRILLE", "GRILL", "REGISTER", "GRL"],
+      "keywords": ["GRILLE", "GRILL", "REGISTER", "GRL", "RAG", "SAG", "EAL"],
       "exclude_keywords": []
     },
     "volume_control_damper": {
       "description": "Volume control dampers (circular and rectangular)",
-      "exact_layers": ["HVAC-VCD"],
-      "keywords": ["VCD", "VOLUME", "DAMPER", "SVD"],
+      "exact_layers": ["HVAC-VCD", "M-DAMPER-VCD", "M-HVAC-DAMPER-V", "MEP-DAMPER-VOL", "M_DAMPER_VCD"],
+      "keywords": ["VCD", "VOLUME", "DAMPER", "SVD", "OBD", "PBD"],
       "exclude_keywords": ["FIRE", "MOTOR", "NON-RETURN", "SOUND"]
     },
     "fire_damper": {
       "description": "Fire dampers (at fire-rated wall/slab penetrations)",
-      "exact_layers": ["HVAC-FD"],
-      "keywords": ["FIRE", "FD", "LFD", "DFD"],
+      "exact_layers": ["HVAC-FD", "M-DAMPER-FD", "M-HVAC-DAMPER-FD", "MEP-DAMPER-FIRE", "M_DAMPER_FD"],
+      "keywords": ["FIRE", "FD", "LFD", "DFD", "MFD"],
       "exclude_keywords": ["ALARM", "FIGHTING", "HOSE", "EXTINGUISHER", "SPRINKLER"]
     },
     "motorized_damper": {
       "description": "Motorized dampers (automation/control)",
-      "exact_layers": [],
-      "keywords": ["MOTORIZ", "MOTOR", "DAMPER", "ACTUATOR"],
+      "exact_layers": ["M-DAMPER-MD", "M-HVAC-DAMPER-M", "MEP-DAMPER-MOT", "M_DAMPER_MD"],
+      "keywords": ["MOTORIZ", "MOTOR", "DAMPER", "ACTUATOR", "MSD"],
       "exclude_keywords": ["FIRE", "VOLUME", "NON-RETURN"]
     },
     "non_return_damper": {
       "description": "Non-return / backdraft dampers",
-      "exact_layers": [],
-      "keywords": ["NON-RETURN", "BACKDRAFT", "NRD", "CHECK"],
+      "exact_layers": ["M-DAMPER-NRD", "M-HVAC-DAMPER-NR", "MEP-DAMPER-NRR", "M_DAMPER_NRD"],
+      "keywords": ["NON-RETURN", "BACKDRAFT", "NRD", "CHECK", "BDD"],
       "exclude_keywords": ["FIRE", "VOLUME"]
     },
     "sound_attenuator": {
       "description": "Sound attenuators / silencers",
-      "exact_layers": ["HVAC-Sound-Attenuater"],
+      "exact_layers": ["HVAC-Sound-Attenuater", "M-ATTENUATOR", "M-HVAC-ATTENUATOR", "MEP-SILENCER", "M_ATTENUATOR"],
       "keywords": ["SOUND", "ATTENUATOR", "SILENCER", "ACOUSTIC"],
       "exclude_keywords": ["LINING", "INSULATION"]
     },
     "thermostat": {
       "description": "Wall-mounted thermostats (qty should equal FCU count)",
-      "exact_layers": ["HVAC-THERMOSTAT", "HVAC T STAT"],
-      "keywords": ["THERMOSTAT", "T STAT", "TSTAT", "THERMO"],
+      "exact_layers": ["HVAC-THERMOSTAT", "HVAC T STAT", "M-CTRL", "M-HVAC-CTRL", "MEP-CONTROL", "M_CTRL"],
+      "keywords": ["THERMOSTAT", "T STAT", "TSTAT", "THERMO", "CTRL_TEMP", "ROOM_SENSOR"],
       "exclude_keywords": []
     },
     "fcu": {
       "description": "Fan coil units (ducted + wall-mounted)",
-      "exact_layers": ["HVAC-FCU", "M-FCU", "AC-FAN COIL"],
+      "exact_layers": ["HVAC-FCU", "M-FCU", "AC-FAN COIL", "M-EQPM-FCU", "M-HVAC-FCU", "MEP-FCU", "M_EQPM_FCU"],
       "keywords": ["FCU", "FAN COIL", "FANCOIL"],
       "exclude_keywords": []
     },
@@ -83,9 +84,9 @@
       "exclude_keywords": ["INDOOR", "IDU"]
     },
     "air_handling_unit": {
-      "description": "AHU / FAHU units",
-      "exact_layers": ["M-AHU"],
-      "keywords": ["AHU", "FAHU", "AIR HANDLING"],
+      "description": "AHU / FAHU / MAHU units",
+      "exact_layers": ["M-AHU", "M-EQPM-AHU", "M-HVAC-AHU", "MEP-AHU", "M_EQPM_AHU"],
+      "keywords": ["AHU", "FAHU", "MAHU", "AIR HANDLING", "MAU", "PAU", "HRV", "ERV"],
       "exclude_keywords": []
     },
     "access_door": {
@@ -95,9 +96,9 @@
       "exclude_keywords": ["FIRE"]
     },
     "exhaust_fan": {
-      "description": "Exhaust / ventilation fans (inline, roof, wall)",
-      "exact_layers": ["HVAC-EXHAUST EQUIPMENT"],
-      "keywords": ["EXHAUST", "FAN", "EAF", "VENTILAT"],
+      "description": "Exhaust / ventilation fans (inline, roof, wall, stairwell pressurization, smoke extract)",
+      "exact_layers": ["HVAC-EXHAUST EQUIPMENT", "M-FAN-EXTR", "M-HVAC-FAN-E", "MEP-FAN-EXHAUST", "M_FAN_EXHAUST"],
+      "keywords": ["EXHAUST", "FAN", "EAF", "VENTILAT", "SPF", "SEF"],
       "exclude_keywords": ["DIFFUSER", "DUCT"]
     },
     "air_curtain": {
@@ -107,10 +108,10 @@
       "exclude_keywords": []
     },
     "damper_general": {
-      "description": "General damper (type unclassified)",
+      "description": "General damper (type unclassified) — catch-all, only matches when no specific damper type applies",
       "exact_layers": ["M-DMPR"],
       "keywords": ["DAMPER", "DMPR"],
-      "exclude_keywords": []
+      "exclude_keywords": ["FIRE", "MOTOR", "MOTORIZ", "NON-RETURN", "VOLUME", "VCD", "SOUND", "BACKDRAFT", "NRD"]
     },
     "hvac_equipment": {
       "description": "General HVAC equipment (unclassified)",
@@ -121,19 +122,19 @@
     "supply_duct": {
       "description": "Supply air ductwork",
       "exact_layers": ["HVAC-SUPPLY", "HVAC-SA", "M-SADUCT"],
-      "keywords": ["SUPPLY", "DUCT", "SA"],
+      "keywords": ["SUPPLY", "DUCT", "SADUCT"],
       "exclude_keywords": ["DIFFUSER", "OUTLET", "AIR OUTLET", "DAMPER", "VOLUME"]
     },
     "return_duct": {
       "description": "Return air ductwork",
       "exact_layers": ["HVAC-RETURN", "M-RADUCT"],
-      "keywords": ["RETURN", "DUCT", "RA"],
+      "keywords": ["RETURN", "DUCT", "RADUCT"],
       "exclude_keywords": ["DIFFUSER", "OUTLET", "AIR OUTLET", "DAMPER"]
     },
     "exhaust_duct": {
       "description": "Exhaust / extract air ductwork",
       "exact_layers": ["HVAC-EXTRACT", "M-EADUCT", "M-EX-DUCT"],
-      "keywords": ["EXTRACT", "EXHAUST", "EA", "DUCT"],
+      "keywords": ["EXTRACT", "EXHAUST", "EADUCT", "DUCT"],
       "exclude_keywords": ["DIFFUSER", "FAN", "EQUIPMENT"]
     },
     "fresh_air_duct": {
@@ -151,7 +152,7 @@
     "drain_pipe": {
       "description": "AC condensate drain piping",
       "exact_layers": ["AC DRAIN PIPE", "M-DR-ACDP"],
-      "keywords": ["DRAIN", "CONDENSATE", "ACDP"],
+      "keywords": ["DRAIN", "CONDENSATE", "ACDP", "CDP"],
       "exclude_keywords": ["SEWER", "STORM", "RAIN"]
     },
     "insulation": {

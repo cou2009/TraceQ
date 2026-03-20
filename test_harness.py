@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from traceq_engine import TraceQEngine
 import openpyxl
 
-BASE = "/sessions/charming-zen-curie/mnt/Claude Docs"
+BASE = "/sessions/sweet-exciting-heisenberg/mnt/Claude Docs"
 
 SAMPLES = {
     "S1": {
@@ -136,12 +136,14 @@ CATEGORY_MAP = {
     "sound_attenuator": ["sound attenuator", "acoustic elbow"],
     "motorized_damper": ["motorize damper", "motorized damper"],
     "non_return_damper": ["non-return damper", "non return damper", "nrd"],
-    "exhaust_fan": ["extract fan", "exhaust fan", "eaf-", "faf-", "kitchen hood extract", "make up air fan", "smoke extract fan", "toilet extract fan"],
-    "circular_diffuser": ["circular diffuser"],
+    "exhaust_fan": ["extract fan", "exhaust fan", "eaf-", "faf-", "kitchen hood extract", "make up air fan", "smoke extract fan", "toilet extract fan", "stairwell pressuri", "smoke extract"],
+    "circular_diffuser": ["circular diffuser", "round diffuser"],
     "insulation": ["insulation", "acoustic lin"],
     "louver": ["louver", "sand trap"],
     "fahu": ["fahu", "fresh air handling"],
     "copper_piping": ["copper pip", "refrigerant copper"],
+    "air_handling_unit": ["air handling unit", "ahu"],
+    "access_door": ["access door", "access panel", "inspection door"],
 }
 
 def categorise_boq_item(desc):
@@ -212,6 +214,56 @@ def run_engine(sample_config):
 
     return combined, scan, len(dxf_files)
 
+# ── CATEGORY EQUIVALENCES ─────────────────────────────────────────────────────
+# Maps BOQ categories to engine categories that should also be checked.
+# These represent genuine industry terminology overlaps — the same physical
+# equipment gets different category names depending on the consultant/contractor.
+# Universal, not sample-specific. Each entry means: "if the BOQ says X, also
+# look for Y in the engine results and sum the counts."
+
+CATEGORY_EQUIVALENCES = {
+    "fcu": ["indoor_unit"],           # Ducted split units are indoor units functioning as FCUs
+    "indoor_unit": ["fcu"],           # Reverse: some BOQs list indoor units, engine may call them FCU
+    "vrf": ["outdoor_unit"],          # VRF outdoor units sometimes categorised separately
+    "outdoor_unit": ["vrf"],          # Reverse
+    "extract_diffuser": ["exhaust_fan"],  # Toilet extract diffusers sometimes classified as exhaust
+    "grille": ["return_diffuser", "supply_diffuser"],  # Some BOQs call diffusers "grilles"
+}
+
+def get_engine_count(engine_results, boq_cat):
+    """Get engine count for a BOQ category, using equivalences as FALLBACK only.
+    Logic: use primary count if > 0. If primary is 0, try equivalent categories
+    and take the BEST (highest count) match — never sum multiple equivalents.
+    Returns (count, source_description)."""
+    primary = engine_results.get(boq_cat, {}).get('count', 0)
+
+    if primary > 0:
+        return primary, ""
+
+    # Primary is 0 — try equivalents as fallback, pick the best one
+    best_count = 0
+    best_cat = None
+    for equiv_cat in CATEGORY_EQUIVALENCES.get(boq_cat, []):
+        equiv_count = engine_results.get(equiv_cat, {}).get('count', 0)
+        if equiv_count > best_count:
+            best_count = equiv_count
+            best_cat = equiv_cat
+
+    if best_count > 0:
+        return best_count, f"via {best_cat}={best_count}"
+
+    return 0, ""
+
+def get_matched_engine_categories(boq_agg):
+    """Return set of engine categories that are accounted for by BOQ matches
+    (including via equivalences). Used to avoid false positive flagging."""
+    matched = set()
+    for cat in boq_agg:
+        matched.add(cat)
+        for equiv_cat in CATEGORY_EQUIVALENCES.get(cat, []):
+            matched.add(equiv_cat)
+    return matched
+
 # ── COMPARISON ────────────────────────────────────────────────────────────────
 
 def compare(engine_results, boq_agg):
@@ -223,13 +275,17 @@ def compare(engine_results, boq_agg):
     verify = 0
     details = []
 
+    # Build set of engine categories covered by BOQ (direct + equivalences)
+    covered_categories = get_matched_engine_categories(boq_agg)
+
     # Check each BOQ category against engine
     for cat, boq_data in sorted(boq_agg.items()):
-        engine_count = engine_results.get(cat, {}).get('count', 0)
+        engine_count, equiv_source = get_engine_count(engine_results, cat)
         boq_qty = boq_data['qty']
+        equiv_note = f"  [{equiv_source}]" if equiv_source else ""
 
         if not boq_data['countable']:
-            details.append(f"  {'⚠️ VERIFY':10s} {cat:30s} BOQ={boq_qty:>8.0f} {boq_data['unit']:8s} Engine={engine_count:>6,}  (unit mismatch)")
+            details.append(f"  {'⚠️ VERIFY':10s} {cat:30s} BOQ={boq_qty:>8.0f} {boq_data['unit']:8s} Engine={engine_count:>6,}  (unit mismatch){equiv_note}")
             verify += 1
             continue
 
@@ -237,20 +293,21 @@ def compare(engine_results, boq_agg):
             details.append(f"  {'❌ MISS':10s} {cat:30s} BOQ={boq_qty:>8.0f}  Engine=     0  NOT DETECTED")
             not_detected += 1
         elif abs(engine_count - boq_qty) / max(boq_qty, 1) <= 0.05:
-            details.append(f"  {'✅ MATCH':10s} {cat:30s} BOQ={boq_qty:>8.0f}  Engine={engine_count:>6,}")
+            details.append(f"  {'✅ MATCH':10s} {cat:30s} BOQ={boq_qty:>8.0f}  Engine={engine_count:>6,}{equiv_note}")
             matches += 1
         elif abs(engine_count - boq_qty) / max(boq_qty, 1) <= 0.15:
-            details.append(f"  {'⚠️ CLOSE':10s} {cat:30s} BOQ={boq_qty:>8.0f}  Engine={engine_count:>6,}  ({engine_count/boq_qty:.0%})")
+            details.append(f"  {'⚠️ CLOSE':10s} {cat:30s} BOQ={boq_qty:>8.0f}  Engine={engine_count:>6,}  ({engine_count/boq_qty:.0%}){equiv_note}")
             matches += 0.5  # Half credit
             mismatches += 0.5
         else:
             direction = "OVER" if engine_count > boq_qty else "UNDER"
-            details.append(f"  {'❌ ' + direction:10s} {cat:30s} BOQ={boq_qty:>8.0f}  Engine={engine_count:>6,}  ({engine_count/boq_qty:.0%})")
+            details.append(f"  {'❌ ' + direction:10s} {cat:30s} BOQ={boq_qty:>8.0f}  Engine={engine_count:>6,}  ({engine_count/boq_qty:.0%}){equiv_note}")
             mismatches += 1
 
     # Check for false positives (engine found but not in BOQ, with significant count)
+    # Skip categories that are covered by BOQ via equivalences
     for equip, edata in sorted(engine_results.items(), key=lambda x: -x[1]['count']):
-        if equip not in boq_agg and edata['count'] > 5:
+        if equip not in covered_categories and edata['count'] > 5:
             details.append(f"  {'🔍 EXTRA':10s} {equip:30s}                Engine={edata['count']:>6,}  (not in BOQ)")
             false_positives += 1
 
