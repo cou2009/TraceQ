@@ -284,9 +284,20 @@ def aggregate_with_dedup(floor_groups, per_file_results):
 
 # ── ENGINE RUNNER ─────────────────────────────────────────────────────────────
 
+def is_layout_drawing(filepath, skip_patterns):
+    """Check if a DXF file is a layout drawing (not a schedule/detail/schematic).
+    Returns True if the file should be included in equipment counting."""
+    basename_upper = os.path.basename(filepath).upper()
+    for pattern in skip_patterns:
+        if pattern.upper() in basename_upper:
+            return False
+    return True
+
+
 def run_engine(sample_config):
     """Run engine on all DXF files for a sample, return merged equipment counts.
-    Uses multi-view deduplication when floor pairs are detected."""
+    Uses multi-view deduplication when floor pairs are detected.
+    Filters out non-layout drawings (schedules, details, schematics)."""
     engine = TraceQEngine()
 
     # Get DXF file list
@@ -298,12 +309,19 @@ def run_engine(sample_config):
     else:
         dxf_files = sample_config['dxf_files']
 
-    # Quick scan first file
-    scan = engine.quick_scan(dxf_files[0])
+    # Filter out non-layout drawings (schedules, details, schematics)
+    skip_patterns = engine.config.skip_file_patterns
+    layout_files = [f for f in dxf_files if is_layout_drawing(f, skip_patterns)]
+    skipped = [os.path.basename(f) for f in dxf_files if f not in layout_files]
+    if skipped:
+        print(f"  📋 Skipping non-layout files: {', '.join(skipped)}")
 
-    # Full analysis on each file — store per-file results
+    # Quick scan first layout file
+    scan = engine.quick_scan(layout_files[0] if layout_files else dxf_files[0])
+
+    # Full analysis on each layout file — store per-file results
     per_file_results = {}
-    for fpath in dxf_files:
+    for fpath in layout_files:
         try:
             result = engine.analyze(fpath)
             rd = result.to_dict()
@@ -314,10 +332,10 @@ def run_engine(sample_config):
             per_file_results[fpath] = {}
 
     # Detect floor pairs and aggregate with deduplication
-    floor_groups = detect_floor_groups(dxf_files)
+    floor_groups = detect_floor_groups(layout_files)
     combined = aggregate_with_dedup(floor_groups, per_file_results)
 
-    return combined, scan, len(dxf_files)
+    return combined, scan, len(layout_files)
 
 # ── CATEGORY EQUIVALENCES ─────────────────────────────────────────────────────
 # Maps BOQ categories to engine categories that should also be checked.

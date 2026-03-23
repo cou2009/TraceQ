@@ -1,20 +1,20 @@
 {
-  "_version": "1.4",
+  "_version": "1.5",
   "_source": "Nestor NHM layer standards + HVAC layer standards + Nestor feedback March 20 (25 new abbreviations)",
   "_notes": "Fuzzy matching uses keywords array. Exact match checked first, then keyword tokens. IMPORTANT: 2-letter keywords removed in v1.2 — they caused false layer classifications.",
-  "_changelog": "v1.4 (Mar 23): Removed DIFFUSER from extract_diffuser keywords to fix S2 regression (generic DIFF/DIFFUSER match was causing extract to outscore supply/return due to fewer total keywords). Added M_T.EX_DIFF as exact_layer for extract_diffuser. v1.3 (Mar 23): Added tier1_skip_blocks to filter known non-equipment blocks from layer-based counting. v1.2 (Mar 20): Removed all problematic 2-letter keywords (SD, RD, ED, VD, MD, TH, EF, SF, RF, BF, SA, EA, RA) that caused layer misclassification regression. Kept 3+ letter Nestor abbreviations (SLSD, RLSD, MSD, OBD, PBD, etc.).",
+  "_changelog": "v1.5 (Mar 23): Added skip_file_patterns for non-layout drawing filtering. Removed DIFF from supply_diffuser and return_diffuser keywords — it was double-counting with DIFFUSER on bare 'DIFFUSER' layers (S1 had 32 return_diffuser false positives from this). Token-in-keyword matching still handles M-DIFF-SUPP etc. v1.4 (Mar 23): Removed DIFFUSER from extract_diffuser keywords to fix S2 regression. v1.3 (Mar 23): Added tier1_skip_blocks. v1.2 (Mar 20): Removed problematic 2-letter keywords.",
 
   "equipment_categories": {
     "supply_diffuser": {
       "description": "Supply air diffusers (ceiling/wall mounted)",
       "exact_layers": ["HVAC-Diff-Supply", "HVAC-SUPPLY AIR OUTLET", "M-S DIFFUSER", "M-SUPPLY AIR DIFUSER", "M-DIFF-SUPP", "M-HVAC-DIFF-S", "MEP-DIFFUSER-SUPPLY", "M_DIFF_SUPPLY", "SUPPLY DIFFUSER"],
-      "keywords": ["SUPPLY", "DIFFUSER", "DIFF", "SAD", "SALD", "DIFUSER", "SLSD", "SQD"],
+      "keywords": ["SUPPLY", "DIFFUSER", "SAD", "SALD", "DIFUSER", "SLSD", "SQD"],
       "exclude_keywords": ["DUCT", "PIPE", "VOLUME"]
     },
     "return_diffuser": {
       "description": "Return air diffusers (ceiling/wall mounted)",
       "exact_layers": ["HVAC-Diff-Return", "HVAC-RETURN AIR OUTLET", "M-R DIFFUSER", "M-DIFF-RETN", "M-HVAC-DIFF-R", "MEP-DIFFUSER-RETURN", "M_DIFF_RETURN", "RETURN DIFFUSER"],
-      "keywords": ["RETURN", "DIFFUSER", "DIFF", "RAD", "RALD", "RLSD"],
+      "keywords": ["RETURN", "DIFFUSER", "RAD", "RALD", "RLSD"],
       "exclude_keywords": ["DUCT", "PIPE"]
     },
     "extract_diffuser": {
@@ -168,6 +168,12 @@
     "patterns": ["TEXT", "DIM", "ANNOTATION", "ARROW", "XREF", "DEFPOINTS", "BORDER",
                  "GRID", "AXIS", "FRAME", "LEGEND", "TITLE", "NOTES", "LEADER",
                  "HATCH", "SECTION", "DETAIL", "SCHEDULE", "SCHEMATIC"]
+  },
+
+  "skip_file_patterns": {
+    "_description": "Filename substrings that identify non-layout DXF drawings. Files matching these patterns should be EXCLUDED from equipment counting. These are reference sheets (schedules, details, schematics) that show symbolic equipment, not spatially placed equipment.",
+    "_rationale": "MEP drawing sets include layout drawings (actual floor plans with equipment at real locations) plus reference sheets (schedules = tabular data, details = installation close-ups, schematics = single-line system diagrams). Only layout drawings have real, countable equipment. Reference sheets inflate counts with duplicate/symbolic items.",
+    "substrings": ["SCHEDULE", "DETAIL", "SCHEMATIC"]
   },
 
   "tier1_skip_blocks": {

@@ -91,6 +91,12 @@ class Config:
         Returns dict with 'exact_names' (list) and 'contains_substrings' (list)."""
         return self.layer_standards.get("tier1_skip_blocks", {})
 
+    @property
+    def skip_file_patterns(self):
+        """Filename substrings that identify non-layout DXF files (schedules,
+        details, schematics). These should be excluded from equipment counting."""
+        return self.layer_standards.get("skip_file_patterns", {}).get("substrings", [])
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # FILE CONVERTER (DWG → DXF)
