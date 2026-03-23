@@ -262,6 +262,14 @@
       "confidence_note": "Fully descriptive block name. High confidence.",
       "samples_seen": ["S1"],
       "nestor_confirmed": false
+    },
+    "AIR CURTAIN": {
+      "equipment_type": "air_curtain",
+      "description": "Air curtain unit (entrance door). 6 found in S1 on M-AC-FAN layer. S1 BOQ lists 6 air curtains.",
+      "confidence": 0.95,
+      "confidence_note": "Fully descriptive block name. Exact BOQ match.",
+      "samples_seen": ["S1"],
+      "nestor_confirmed": false
     }
   },
 

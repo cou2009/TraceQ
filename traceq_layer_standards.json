@@ -1,31 +1,31 @@
 {
-  "_version": "1.3",
+  "_version": "1.4",
   "_source": "Nestor NHM layer standards + HVAC layer standards + Nestor feedback March 20 (25 new abbreviations)",
   "_notes": "Fuzzy matching uses keywords array. Exact match checked first, then keyword tokens. IMPORTANT: 2-letter keywords removed in v1.2 — they caused false layer classifications.",
-  "_changelog": "v1.3 (Mar 23): Added tier1_skip_blocks to filter known non-equipment blocks from layer-based counting. v1.2 (Mar 20): Removed all problematic 2-letter keywords (SD, RD, ED, VD, MD, TH, EF, SF, RF, BF, SA, EA, RA) that caused layer misclassification regression. Kept 3+ letter Nestor abbreviations (SLSD, RLSD, MSD, OBD, PBD, etc.).",
+  "_changelog": "v1.4 (Mar 23): Removed DIFFUSER from extract_diffuser keywords to fix S2 regression (generic DIFF/DIFFUSER match was causing extract to outscore supply/return due to fewer total keywords). Added M_T.EX_DIFF as exact_layer for extract_diffuser. v1.3 (Mar 23): Added tier1_skip_blocks to filter known non-equipment blocks from layer-based counting. v1.2 (Mar 20): Removed all problematic 2-letter keywords (SD, RD, ED, VD, MD, TH, EF, SF, RF, BF, SA, EA, RA) that caused layer misclassification regression. Kept 3+ letter Nestor abbreviations (SLSD, RLSD, MSD, OBD, PBD, etc.).",
 
   "equipment_categories": {
     "supply_diffuser": {
       "description": "Supply air diffusers (ceiling/wall mounted)",
-      "exact_layers": ["HVAC-Diff-Supply", "HVAC-SUPPLY AIR OUTLET", "M-S DIFFUSER", "M-SUPPLY AIR DIFUSER", "M-DIFF-SUPP", "M-HVAC-DIFF-S", "MEP-DIFFUSER-SUPPLY", "M_DIFF_SUPPLY"],
-      "keywords": ["SUPPLY", "DIFF", "SAD", "SALD", "DIFUSER", "SLSD", "SQD"],
+      "exact_layers": ["HVAC-Diff-Supply", "HVAC-SUPPLY AIR OUTLET", "M-S DIFFUSER", "M-SUPPLY AIR DIFUSER", "M-DIFF-SUPP", "M-HVAC-DIFF-S", "MEP-DIFFUSER-SUPPLY", "M_DIFF_SUPPLY", "SUPPLY DIFFUSER"],
+      "keywords": ["SUPPLY", "DIFFUSER", "DIFF", "SAD", "SALD", "DIFUSER", "SLSD", "SQD"],
       "exclude_keywords": ["DUCT", "PIPE", "VOLUME"]
     },
     "return_diffuser": {
       "description": "Return air diffusers (ceiling/wall mounted)",
-      "exact_layers": ["HVAC-Diff-Return", "HVAC-RETURN AIR OUTLET", "M-R DIFFUSER", "M-DIFF-RETN", "M-HVAC-DIFF-R", "MEP-DIFFUSER-RETURN", "M_DIFF_RETURN"],
-      "keywords": ["RETURN", "DIFF", "RAD", "RALD", "RLSD"],
+      "exact_layers": ["HVAC-Diff-Return", "HVAC-RETURN AIR OUTLET", "M-R DIFFUSER", "M-DIFF-RETN", "M-HVAC-DIFF-R", "MEP-DIFFUSER-RETURN", "M_DIFF_RETURN", "RETURN DIFFUSER"],
+      "keywords": ["RETURN", "DIFFUSER", "DIFF", "RAD", "RALD", "RLSD"],
       "exclude_keywords": ["DUCT", "PIPE"]
     },
     "extract_diffuser": {
       "description": "Extract/exhaust air diffusers",
-      "exact_layers": ["HVAC-Diff-Extract", "HVAC-EACD", "M-DIFF-EXTR", "M-HVAC-DIFF-E", "MEP-DIFFUSER-EXHAUST", "M_DIFF_EXTRACT"],
+      "exact_layers": ["HVAC-Diff-Extract", "HVAC-EACD", "M-DIFF-EXTR", "M-HVAC-DIFF-E", "MEP-DIFFUSER-EXHAUST", "M_DIFF_EXTRACT", "M_T.EX_DIFF"],
       "keywords": ["EXTRACT", "EXHAUST", "DIFF", "EAG"],
       "exclude_keywords": ["DUCT", "EQUIP", "FAN"]
     },
     "grille": {
       "description": "Grilles and registers (general)",
-      "exact_layers": ["M-DIFGRL"],
+      "exact_layers": ["M-DIFGRL", "SUPPLY GRILLE", "RETURN GRILLE"],
       "keywords": ["GRILLE", "GRILL", "REGISTER", "GRL", "RAG", "SAG", "EAL"],
       "exclude_keywords": []
     },

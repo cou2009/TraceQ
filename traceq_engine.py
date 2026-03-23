@@ -624,7 +624,8 @@ class LayerClassifier:
                 hit_bonus = hits * 0.10
                 score = min(proportion + hit_bonus, 1.0)
                 # Bonus for HVAC-prefixed layers (more likely to be equipment)
-                if 'HVAC' in upper or upper.startswith('M-'):
+                # M- and M_ are both common HVAC layer prefixes (M-AC-FAN, M_AC_EQUIP, etc.)
+                if 'HVAC' in upper or upper.startswith('M-') or upper.startswith('M_'):
                     score = min(score + 0.15, 1.0)
                 # Exact token match floor: if a keyword matches a token exactly
                 # (e.g., layer contains "VCD" as a distinct token), ensure minimum
