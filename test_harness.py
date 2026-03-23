@@ -172,10 +172,121 @@ def aggregate_boq(boq_items):
             uncategorised.append(item)
     return agg, uncategorised
 
+# ── MULTI-VIEW FLOOR DEDUPLICATION ────────────────────────────────────────────
+# MEP projects often have paired drawings for the same floor: AC (air conditioning)
+# + VE (ventilation) views. Equipment like FCUs appears in both → double counting.
+# Detection: match filenames by floor identifier. Dedup: take MAX per equipment
+# type per floor, then SUM across floors. Universal, not sample-specific.
+
+import re as _re
+
+def detect_floor_groups(dxf_files):
+    """Group DXF files by physical floor. Files covering the same floor from
+    different views (AC/VE/VENTILATION) are grouped together.
+
+    Returns: list of groups, where each group is a list of file paths.
+    Single files are their own group. Paired files share a group.
+
+    Supports patterns:
+      - "AC-100-..." / "VE-100-..." (view prefix + floor number)
+      - "...AC LAYOUT GROUND FLOOR..." / "...VENTILATION LAYOUT GROUND FLOOR..."
+    """
+    assigned = set()
+    groups_dict = {}  # floor_key → list of files
+
+    for fpath in dxf_files:
+        if fpath in assigned:
+            continue
+        basename = os.path.basename(fpath).upper()
+
+        # Pattern 1: AC-NNN or VE-NNN prefix (e.g., AC-100-BASEMENT FLOOR PLAN)
+        m = _re.match(r'^(AC|VE)-(\d+)', basename)
+        if m:
+            floor_key = f"P1_{m.group(2)}"
+            groups_dict.setdefault(floor_key, []).append(fpath)
+            assigned.add(fpath)
+            continue
+
+        # Pattern 2: "AC LAYOUT <floor>" or "VENTILATION LAYOUT <floor>"
+        m = _re.search(r'(?:^|[\s-])(AC|VENTILATION|VE)\s+LAYOUT\s+(.+?)\.DXF', basename)
+        if m:
+            floor_desc = m.group(2).strip()
+            floor_key = f"P2_{floor_desc}"
+            groups_dict.setdefault(floor_key, []).append(fpath)
+            assigned.add(fpath)
+            continue
+
+        # No pattern match — standalone file
+        groups_dict[f"solo_{fpath}"] = [fpath]
+        assigned.add(fpath)
+
+    return list(groups_dict.values())
+
+
+def aggregate_with_dedup(floor_groups, per_file_results):
+    """Aggregate equipment counts with multi-view deduplication.
+
+    For floor groups with multiple files: take MAX per equipment type
+    (same physical equipment seen from different views).
+    For single files: take count directly.
+    Sum across all floor groups.
+
+    Args:
+        floor_groups: list of [filepath, ...] groups from detect_floor_groups
+        per_file_results: dict {filepath: {equip_type: {count, source, ...}}}
+
+    Returns: combined dict {equip_type: {count, source, confidence, ...}}
+    """
+    combined = {}
+
+    for group in floor_groups:
+        if len(group) == 1:
+            # Single file — add counts directly
+            for equip_type, edata in per_file_results.get(group[0], {}).items():
+                count = edata.get('count', 0)
+                if equip_type not in combined:
+                    combined[equip_type] = {
+                        'count': count,
+                        'source': edata.get('source', '?'),
+                        'confidence': edata.get('confidence', 0),
+                        'needs_review': edata.get('needs_review', False),
+                        'alternate_counts': edata.get('alternate_counts', {}),
+                    }
+                else:
+                    combined[equip_type]['count'] += count
+        else:
+            # Multi-view floor — take MAX per equipment type across views
+            floor_max = {}
+            floor_meta = {}  # Keep metadata from the view with the highest count
+            for fpath in group:
+                for equip_type, edata in per_file_results.get(fpath, {}).items():
+                    count = edata.get('count', 0)
+                    if equip_type not in floor_max or count > floor_max[equip_type]:
+                        floor_max[equip_type] = count
+                        floor_meta[equip_type] = edata
+
+            # Add floor-level MAX to combined totals
+            for equip_type, count in floor_max.items():
+                if equip_type not in combined:
+                    edata = floor_meta[equip_type]
+                    combined[equip_type] = {
+                        'count': count,
+                        'source': edata.get('source', '?'),
+                        'confidence': edata.get('confidence', 0),
+                        'needs_review': edata.get('needs_review', False),
+                        'alternate_counts': edata.get('alternate_counts', {}),
+                    }
+                else:
+                    combined[equip_type]['count'] += count
+
+    return combined
+
+
 # ── ENGINE RUNNER ─────────────────────────────────────────────────────────────
 
 def run_engine(sample_config):
-    """Run engine on all DXF files for a sample, return merged equipment counts."""
+    """Run engine on all DXF files for a sample, return merged equipment counts.
+    Uses multi-view deduplication when floor pairs are detected."""
     engine = TraceQEngine()
 
     # Get DXF file list
@@ -190,27 +301,21 @@ def run_engine(sample_config):
     # Quick scan first file
     scan = engine.quick_scan(dxf_files[0])
 
-    # Full analysis on each file, merge counts
-    combined = {}
+    # Full analysis on each file — store per-file results
+    per_file_results = {}
     for fpath in dxf_files:
         try:
             result = engine.analyze(fpath)
             rd = result.to_dict()
             file_merged = rd.get('equipment_inventory', rd.get('merged', {}))
-            for equip_type, edata in file_merged.items():
-                count = edata.get('count', 0)
-                if equip_type not in combined:
-                    combined[equip_type] = {
-                        'count': count,
-                        'source': edata.get('source', '?'),
-                        'confidence': edata.get('confidence', 0),
-                        'needs_review': edata.get('needs_review', False),
-                        'alternate_counts': edata.get('alternate_counts', {}),
-                    }
-                else:
-                    combined[equip_type]['count'] += count
+            per_file_results[fpath] = file_merged
         except Exception as e:
             print(f"  ⚠️ FAILED on {os.path.basename(fpath)}: {e}")
+            per_file_results[fpath] = {}
+
+    # Detect floor pairs and aggregate with deduplication
+    floor_groups = detect_floor_groups(dxf_files)
+    combined = aggregate_with_dedup(floor_groups, per_file_results)
 
     return combined, scan, len(dxf_files)
 
