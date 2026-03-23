@@ -104,9 +104,9 @@
     },
     "DFD": {
       "equipment_type": "fire_damper",
-      "description": "Fire damper (duct fire damper) block — Project 4. 140 generic + 13 sized (FD-300, FD-250, FD-400).",
-      "confidence": 0.9,
-      "confidence_note": "Nestor confirmed. NOTE: Short named block — skipped in Tier 2.",
+      "description": "Fire damper (duct fire damper) block — Project 4. WARNING: In S1, 135 DFD blocks on AC DUCT layer = duct fitting detail, not fire damper.",
+      "confidence": 0.85,
+      "confidence_note": "Nestor confirmed for P4 but ambiguous (Duct Fitting Detail vs fire damper). Below 0.90 threshold so short block filter catches it — needs per-project verification.",
       "samples_seen": ["P4"],
       "nestor_confirmed": true
     },
