@@ -85,6 +85,12 @@ class Config:
         """Blocks known to be non-equipment (arrows, title blocks, etc.). Skip in detection and unknowns."""
         return self.block_dictionary.get("skip_blocks", {})
 
+    @property
+    def tier1_skip_blocks(self):
+        """Block names to exclude from Tier 1 layer-based counting.
+        Returns dict with 'exact_names' (list) and 'contains_substrings' (list)."""
+        return self.layer_standards.get("tier1_skip_blocks", {})
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # FILE CONVERTER (DWG → DXF)
@@ -934,11 +940,22 @@ class EquipmentDetector:
         return dedup_report
 
     def _tier1_layers(self, parser: DXFParser):
-        """Tier 1: Count entities by classified layer."""
+        """Tier 1: Count entities by classified layer.
+
+        Filters out known non-equipment blocks (arrows, legends, wire mesh, etc.)
+        using config-driven tier1_skip_blocks patterns. This prevents counting
+        airflow arrows, annotation symbols, and other non-equipment INSERTs
+        that happen to sit on equipment layers.
+        """
         results = defaultdict(lambda: {'items': [], 'count': 0, 'source': 'tier1_layer', 'confidence': 1.0})
 
         # Classify all layers
         layer_classes = self.classifier.classify_all_layers(parser.layers.keys())
+
+        # Build Tier 1 block skip filter from config (case-insensitive)
+        skip_cfg = self.config.tier1_skip_blocks
+        skip_exact = {n.upper() for n in skip_cfg.get('exact_names', [])}
+        skip_contains = [s.upper() for s in skip_cfg.get('contains_substrings', [])]
 
         # Count INSERT entities by their classified layer
         for insert in parser.inserts:
@@ -948,10 +965,19 @@ class EquipmentDetector:
             confidence = cls.get('confidence', 0)
 
             if equip_type and confidence >= 0.5:
+                # Filter: skip known non-equipment block names
+                block_name = insert['name']
+                block_upper = block_name.upper()
+
+                if block_upper in skip_exact:
+                    continue
+                if any(sub in block_upper for sub in skip_contains):
+                    continue
+
                 results[equip_type]['count'] += 1
                 results[equip_type]['confidence'] = confidence
                 results[equip_type]['items'].append({
-                    'block_name': insert['name'],
+                    'block_name': block_name,
                     'layer': layer,
                     'x': insert.get('x', 0),
                     'y': insert.get('y', 0),
