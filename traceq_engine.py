@@ -1039,11 +1039,12 @@ class EquipmentDetector:
                 # in P3, but could be "linear flow diffuser" in another project.
                 # Anonymous blocks (*U5, *U19) and system blocks ($0$...) are
                 # drawing-specific and safe — they won't match across projects.
-                # SKIP short named blocks entirely — they'll appear in the
-                # unrecognised blocks section for Nestor to verify per project.
+                # EXCEPTION: if the dictionary entry has HIGH confidence (>=0.90),
+                # the block name is a well-known industry abbreviation (VCD, LFD,
+                # DFD, etc.) and should be trusted even when short.
                 is_anonymous = block_name.startswith('*') or block_name.startswith('$')
                 is_short_named_block = len(block_name.strip()) <= 4 and not is_anonymous
-                if is_short_named_block:
+                if is_short_named_block and confidence < 0.90:
                     continue
 
                 # Extract size/dimension from block name (universal)
