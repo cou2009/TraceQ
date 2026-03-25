@@ -635,10 +635,17 @@ class LayerClassifier:
                     score = min(score + 0.15, 1.0)
                 # Exact token match floor: if a keyword matches a token exactly
                 # (e.g., layer contains "VCD" as a distinct token), ensure minimum
-                # score of 0.4. An exact abbreviation is a strong signal even if
-                # only one keyword out of many matches.
-                if has_exact_token and score < 0.4:
-                    score = 0.4
+                # score. An exact abbreviation is a strong signal even if only one
+                # keyword out of many matches.
+                # Single-token layers get a higher floor (0.55): a concise layer
+                # name like "DIFFUSER" that exactly matches a keyword is a very
+                # strong signal — there's nothing else in the name to dilute it.
+                # Multi-token layers keep 0.40 — one match among many tokens is
+                # weaker evidence.
+                if has_exact_token:
+                    floor = 0.55 if len(tokens) == 1 else 0.40
+                    if score < floor:
+                        score = floor
                 if score > best_score:
                     best_score = score
                     best_match = cat_name

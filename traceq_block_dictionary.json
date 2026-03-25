@@ -415,10 +415,16 @@
       "notes": "Count occurrences of FCU labels. In S5: FCU-01 (88x), FCU-02 (40x), FCU-03 (24x), FCU-4 (4x) = 156 total. BOQ target 170."
     },
     "vrf": {
-      "patterns": ["VRF-[A-Z0-9]+-[A-Z0-9]+", "VRV-[A-Z0-9]+-[A-Z0-9]+", "VRV-\\d+", "VRF-\\d+"],
+      "patterns": ["VRF-(?!IDU)[A-Z0-9]+-[A-Z0-9]+", "VRV-(?!IDU)[A-Z0-9]+-[A-Z0-9]+", "VRV-\\d+", "VRF-\\d+", "VR[VF]\\s+OUTDOOR"],
       "count_method": "count_occurrences",
       "confidence": 0.6,
-      "notes": "Changed to count_occurrences: each VRV/VRF label on drawing represents one physical unit/module. VRV-1 appearing 5 times = 5 modules of that system."
+      "notes": "v1.6: Added negative lookahead (?!IDU) to exclude indoor unit labels (VRV-IDU-GF-01 etc.) which were inflating VRF count by 17x in S1. Added VRV/VRF OUTDOOR pattern to catch 'VRV OUTDOOR UNIT' text labels."
+    },
+    "indoor_unit": {
+      "patterns": ["VRV-IDU-[A-Z0-9]+-[A-Z0-9]+", "VRF-IDU-[A-Z0-9]+-[A-Z0-9]+", "VR[VF]\\s+DUCTED\\s+UNIT", "VR[VF]\\s+DECORATIVE\\s+UNIT", "VR[VF]\\s+WALL\\s+MOUNTED"],
+      "count_method": "count_unique_labels",
+      "confidence": 0.55,
+      "notes": "v1.6: Added to properly classify VRV/VRF indoor unit labels instead of miscounting them as outdoor/VRF units. Uses count_unique_labels since each IDU label is a unique unit identifier."
     },
     "flow_bar": {
       "patterns": ["FLOW\\s*BAR", "S/?R\\s*FLOW\\s*BAR", "FLOW\\s*BAR.*RECESSED", "FB-?\\d+", "\\bFB\\b"],

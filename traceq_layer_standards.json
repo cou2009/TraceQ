@@ -7,7 +7,7 @@
   "equipment_categories": {
     "supply_diffuser": {
       "description": "Supply air diffusers (ceiling/wall mounted)",
-      "exact_layers": ["HVAC-Diff-Supply", "HVAC-SUPPLY AIR OUTLET", "M-S DIFFUSER", "M-SUPPLY AIR DIFUSER", "M-DIFF-SUPP", "M-HVAC-DIFF-S", "MEP-DIFFUSER-SUPPLY", "M_DIFF_SUPPLY", "SUPPLY DIFFUSER"],
+      "exact_layers": ["HVAC-Diff-Supply", "HVAC-SUPPLY AIR OUTLET", "M-S DIFFUSER", "M-SUPPLY AIR DIFUSER", "M-DIFF-SUPP", "M-HVAC-DIFF-S", "MEP-DIFFUSER-SUPPLY", "M_DIFF_SUPPLY", "SUPPLY DIFFUSER", "M_HVAC_SAD"],
       "keywords": ["SUPPLY", "DIFFUSER", "SAD", "SALD", "DIFUSER", "SLSD", "SQD"],
       "exclude_keywords": ["DUCT", "PIPE", "VOLUME"]
     },
@@ -31,7 +31,7 @@
     },
     "volume_control_damper": {
       "description": "Volume control dampers (circular and rectangular)",
-      "exact_layers": ["HVAC-VCD", "M-DAMPER-VCD", "M-HVAC-DAMPER-V", "MEP-DAMPER-VOL", "M_DAMPER_VCD"],
+      "exact_layers": ["HVAC-VCD", "M-DAMPER-VCD", "M-HVAC-DAMPER-V", "MEP-DAMPER-VOL", "M_DAMPER_VCD", "SUPPLY VCD"],
       "keywords": ["VCD", "VOLUME", "DAMPER", "SVD", "OBD", "PBD"],
       "exclude_keywords": ["FIRE", "MOTOR", "NON-RETURN", "SOUND"]
     },
@@ -116,8 +116,9 @@
     "hvac_equipment": {
       "description": "General HVAC equipment (unclassified)",
       "exact_layers": ["HVAC-EQUIPMENT", "HVAC-DUCT EQUIPMENT", "M-EQUP", "M-AC"],
-      "keywords": ["EQUIP", "HVAC", "MECH"],
-      "exclude_keywords": ["TEXT", "DIM", "ARROW", "INSULATION"]
+      "keywords": ["EQUIP", "MECH"],
+      "exclude_keywords": ["TEXT", "DIM", "ARROW", "INSULATION"],
+      "_changelog": "v1.6: Removed HVAC from keywords — it is a namespace prefix, not an equipment type. Causes M_HVAC_SAD (supply diffuser) to misclassify as generic equipment. Specific HVAC equipment layers use exact_layers."
     },
     "supply_duct": {
       "description": "Supply air ductwork",
