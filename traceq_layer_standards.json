@@ -69,7 +69,7 @@
       "description": "Fan coil units (ducted + wall-mounted)",
       "exact_layers": ["HVAC-FCU", "M-FCU", "AC-FAN COIL", "M-EQPM-FCU", "M-HVAC-FCU", "MEP-FCU", "M_EQPM_FCU"],
       "keywords": ["FCU", "FAN COIL", "FANCOIL"],
-      "exclude_keywords": []
+      "exclude_keywords": ["EXHAUST", "EXTRACT", "EX FAN", "EXFAN"]
     },
     "indoor_unit": {
       "description": "AC indoor units (VRV/VRF/DX split indoor)",
@@ -97,8 +97,8 @@
     },
     "exhaust_fan": {
       "description": "Exhaust / ventilation fans (inline, roof, wall, stairwell pressurization, smoke extract)",
-      "exact_layers": ["HVAC-EXHAUST EQUIPMENT", "M-FAN-EXTR", "M-HVAC-FAN-E", "MEP-FAN-EXHAUST", "M_FAN_EXHAUST"],
-      "keywords": ["EXHAUST", "FAN", "EAF", "VENTILAT", "SPF", "SEF"],
+      "exact_layers": ["HVAC-EXHAUST EQUIPMENT", "M-FAN-EXTR", "M-HVAC-FAN-E", "MEP-FAN-EXHAUST", "M_FAN_EXHAUST", "CS-EX FAN"],
+      "keywords": ["EXHAUST", "FAN", "EAF", "VENTILAT", "SPF", "SEF", "EX FAN"],
       "exclude_keywords": ["DIFFUSER", "DUCT"]
     },
     "air_curtain": {
