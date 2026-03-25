@@ -1994,6 +1994,206 @@ class TraceQEngine:
 
         return AnalysisResult(filepath, parser, detection, validation)
 
+    # ── MULTI-FILE ANALYSIS WITH DEDUP ────────────────────────────────────────
+
+    @staticmethod
+    def is_layout_drawing(filepath, skip_patterns):
+        """Check if a DXF file is a layout drawing (not a schedule/detail/schematic).
+        Returns True if the file should be included in equipment counting."""
+        basename_upper = os.path.basename(filepath).upper()
+        for pattern in skip_patterns:
+            if pattern.upper() in basename_upper:
+                return False
+        return True
+
+    @staticmethod
+    def detect_floor_groups(dxf_files):
+        """Group DXF files by physical floor. Files covering the same floor from
+        different views (AC/VE/VENTILATION) are grouped together.
+
+        Returns: list of groups, where each group is a list of file paths.
+        Single files are their own group. Paired files share a group.
+
+        Supports patterns:
+          - "AC-100-..." / "VE-100-..." (view prefix + floor number)
+          - "...AC LAYOUT GROUND FLOOR..." / "...VENTILATION LAYOUT GROUND FLOOR..."
+        """
+        assigned = set()
+        groups_dict = {}  # floor_key → list of files
+
+        for fpath in dxf_files:
+            if fpath in assigned:
+                continue
+            basename = os.path.basename(fpath).upper()
+
+            # Pattern 1: AC-NNN or VE-NNN prefix (e.g., AC-100-BASEMENT FLOOR PLAN)
+            m = re.match(r'^(AC|VE)-(\d+)', basename)
+            if m:
+                floor_key = f"P1_{m.group(2)}"
+                groups_dict.setdefault(floor_key, []).append(fpath)
+                assigned.add(fpath)
+                continue
+
+            # Pattern 2: "AC LAYOUT <floor>" or "VENTILATION LAYOUT <floor>"
+            m = re.search(r'(?:^|[\s-])(AC|VENTILATION|VE)\s+LAYOUT\s+(.+?)\.DXF', basename)
+            if m:
+                floor_desc = m.group(2).strip()
+                floor_key = f"P2_{floor_desc}"
+                groups_dict.setdefault(floor_key, []).append(fpath)
+                assigned.add(fpath)
+                continue
+
+            # No pattern match — standalone file
+            groups_dict[f"solo_{fpath}"] = [fpath]
+            assigned.add(fpath)
+
+        return list(groups_dict.values())
+
+    @staticmethod
+    def aggregate_with_dedup(floor_groups, per_file_results):
+        """Aggregate equipment counts with multi-view deduplication.
+
+        For floor groups with multiple files: take MAX per equipment type
+        (same physical equipment seen from different views).
+        For single files: take count directly.
+        Sum across all floor groups.
+
+        Args:
+            floor_groups: list of [filepath, ...] groups from detect_floor_groups
+            per_file_results: dict {filepath: {equip_type: {count, source, ...}}}
+
+        Returns: combined dict {equip_type: {count, source, confidence, ...}}
+        """
+        combined = {}
+
+        for group in floor_groups:
+            if len(group) == 1:
+                # Single file — add counts directly
+                for equip_type, edata in per_file_results.get(group[0], {}).items():
+                    count = edata.get('count', 0)
+                    if equip_type not in combined:
+                        combined[equip_type] = {
+                            'count': count,
+                            'source': edata.get('source', '?'),
+                            'confidence': edata.get('confidence', 0),
+                            'needs_review': edata.get('needs_review', False),
+                            'alternate_counts': dict(edata.get('alternate_counts', {})),
+                            'items': list(edata.get('items', [])),
+                        }
+                        if edata.get('notes'):
+                            combined[equip_type]['notes'] = edata['notes']
+                    else:
+                        combined[equip_type]['count'] += count
+                        combined[equip_type]['items'] = combined[equip_type].get('items', []) + list(edata.get('items', []))
+                        # Sum alternate counts
+                        for tier_key in ['tier1', 'tier2', 'tier3']:
+                            combined[equip_type]['alternate_counts'][tier_key] = (
+                                combined[equip_type]['alternate_counts'].get(tier_key, 0)
+                                + edata.get('alternate_counts', {}).get(tier_key, 0)
+                            )
+                        if edata.get('needs_review'):
+                            combined[equip_type]['needs_review'] = True
+            else:
+                # Multi-view floor — take MAX per equipment type across views
+                floor_max = {}
+                floor_meta = {}  # Keep metadata from the view with the highest count
+                for fpath in group:
+                    for equip_type, edata in per_file_results.get(fpath, {}).items():
+                        count = edata.get('count', 0)
+                        if equip_type not in floor_max or count > floor_max[equip_type]:
+                            floor_max[equip_type] = count
+                            floor_meta[equip_type] = edata
+
+                # Add floor-level MAX to combined totals
+                for equip_type, count in floor_max.items():
+                    if equip_type not in combined:
+                        edata = floor_meta[equip_type]
+                        combined[equip_type] = {
+                            'count': count,
+                            'source': edata.get('source', '?'),
+                            'confidence': edata.get('confidence', 0),
+                            'needs_review': edata.get('needs_review', False),
+                            'alternate_counts': dict(edata.get('alternate_counts', {})),
+                            'items': list(edata.get('items', [])),
+                        }
+                        if edata.get('notes'):
+                            combined[equip_type]['notes'] = edata['notes']
+                    else:
+                        combined[equip_type]['count'] += count
+                        combined[equip_type]['items'] = combined[equip_type].get('items', []) + list(edata.get('items', []))
+                        for tier_key in ['tier1', 'tier2', 'tier3']:
+                            combined[equip_type]['alternate_counts'][tier_key] = (
+                                combined[equip_type]['alternate_counts'].get(tier_key, 0)
+                                + floor_meta.get(equip_type, {}).get('alternate_counts', {}).get(tier_key, 0)
+                            )
+                        if floor_meta.get(equip_type, {}).get('needs_review'):
+                            combined[equip_type]['needs_review'] = True
+
+        return combined
+
+    def analyze_multi(self, filepaths):
+        """Analyze multiple DXF/DWG files with multi-view deduplication and
+        non-layout file filtering.
+
+        Steps:
+            1. Filter out non-layout files (schedules, details, schematics)
+            2. Analyze each layout file individually
+            3. Detect floor groups (AC/VE pairs)
+            4. Aggregate with dedup (MAX per floor group, SUM across groups)
+
+        Args:
+            filepaths: list of file paths (DXF or DWG)
+
+        Returns: dict with keys:
+            'combined': merged equipment dict {equip_type: {count, source, ...}}
+            'results': list of (filename, AnalysisResult) for each analyzed file
+            'skipped': list of filenames that were filtered out
+            'floor_groups': the detected floor groupings (for audit)
+        """
+        skip_patterns = self.config.skip_file_patterns
+
+        # Step 1: Filter non-layout files
+        layout_files = []
+        skipped = []
+        for fpath in filepaths:
+            if self.is_layout_drawing(fpath, skip_patterns):
+                layout_files.append(fpath)
+            else:
+                skipped.append(os.path.basename(fpath))
+                print(f"[TraceQ] Skipping non-layout file: {os.path.basename(fpath)}")
+
+        # Step 2: Analyze each layout file
+        results = []
+        per_file_results = {}
+        for fpath in layout_files:
+            try:
+                result = self.analyze(fpath)
+                fname = os.path.basename(fpath)
+                results.append((fname, result))
+                per_file_results[fpath] = result.detection_results.get('merged', {})
+            except Exception as e:
+                print(f"[TraceQ] Error analyzing {os.path.basename(fpath)}: {e}")
+
+        # Step 3: Detect floor groups
+        floor_groups = self.detect_floor_groups(layout_files)
+        group_info = []
+        for g in floor_groups:
+            group_info.append([os.path.basename(f) for f in g])
+        print(f"[TraceQ] Floor groups detected: {len(floor_groups)} groups from {len(layout_files)} files")
+        for i, g in enumerate(group_info):
+            if len(g) > 1:
+                print(f"[TraceQ]   Group {i+1} (multi-view): {', '.join(g)}")
+
+        # Step 4: Aggregate with dedup
+        combined = self.aggregate_with_dedup(floor_groups, per_file_results)
+
+        return {
+            'combined': combined,
+            'results': results,
+            'skipped': skipped,
+            'floor_groups': group_info,
+        }
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CLI ENTRY POINT

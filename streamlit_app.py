@@ -1470,7 +1470,7 @@ else:
 
     # ═══ TAB 2: FULL ANALYSIS ════════════════════════════════════════════════
     with tab_analysis:
-        # ─── Analyse all drawing files and merge results ─────────────────────────
+        # ─── Analyse all drawing files with multi-view dedup ─────────────────────
         all_results = []
         combined_merged = {}
         combined_parse_info = {'layers': 0, 'block_types': 0}
@@ -1478,51 +1478,25 @@ else:
 
         with st.spinner(f"Analysing {'drawings' if len(tmp_paths) > 1 else 'drawing'}... this may take a moment."):
             engine = TraceQEngine()
-            for fname, fpath in tmp_paths:
-                try:
-                    result = engine.analyze(fpath)
-                    all_results.append((fname, result))
 
-                    # Merge equipment counts across files
-                    file_merged = result.detection_results.get('merged', {})
-                    for equip_type, data in file_merged.items():
-                        if equip_type not in combined_merged:
-                            combined_merged[equip_type] = {
-                                'count': data.get('count', 0),
-                                'source': data.get('source', 'unknown'),
-                                'confidence': data.get('confidence', 0),
-                                'items': list(data.get('items', [])),
-                                'alternate_counts': dict(data.get('alternate_counts', {})),
-                                'needs_review': data.get('needs_review', False),
-                            }
-                            if data.get('notes'):
-                                combined_merged[equip_type]['notes'] = data['notes']
-                        else:
-                            # Sum counts from additional files
-                            existing = combined_merged[equip_type]
-                            existing['count'] += data.get('count', 0)
-                            existing['items'] = existing.get('items', []) + list(data.get('items', []))
-                            # Sum alternate counts
-                            for tier_key in ['tier1', 'tier2', 'tier3']:
-                                existing['alternate_counts'][tier_key] = (
-                                    existing['alternate_counts'].get(tier_key, 0)
-                                    + data.get('alternate_counts', {}).get(tier_key, 0)
-                                )
-                            # Keep needs_review if any file flags it
-                            if data.get('needs_review'):
-                                existing['needs_review'] = True
+            # Use analyze_multi for multi-view dedup + non-layout file filtering
+            file_paths = [fpath for _, fpath in tmp_paths]
+            multi_result = engine.analyze_multi(file_paths)
 
-                    # Merge parse info
-                    p = result.parse_info
-                    combined_parse_info['layers'] += p.get('layers', 0)
-                    combined_parse_info['block_types'] += p.get('block_types', 0)
+            all_results = multi_result['results']
+            combined_merged = multi_result['combined']
+            skipped_files = multi_result.get('skipped', [])
+            floor_groups = multi_result.get('floor_groups', [])
 
-                except Exception as e:
-                    st.error(f"Analysis failed for {fname}: {str(e)}")
+            # Merge parse info from all results
+            for fname, result in all_results:
+                p = result.parse_info
+                combined_parse_info['layers'] += p.get('layers', 0)
+                combined_parse_info['block_types'] += p.get('block_types', 0)
 
-            # Use the last result's dedup report (typically only one file has it)
+            # Use the last result's dedup report (proximity dedup within single files)
             if all_results:
-                result = all_results[-1][1]  # Keep last result for dedup/validation
+                result = all_results[-1][1]
                 combined_dedup_report = getattr(result, 'dedup_report', None)
 
         # Clean up temp files
@@ -1540,7 +1514,13 @@ else:
         if len(all_results) == 1:
             st.success(f"✅ Analysis complete — **{all_results[0][0]}**")
         else:
-            st.success(f"✅ Analysis complete — **{len(all_results)} files** combined")
+            msg = f"✅ Analysis complete — **{len(all_results)} files** combined"
+            if skipped_files:
+                msg += f" ({len(skipped_files)} non-layout files filtered)"
+            has_multi_view = any(len(g) > 1 for g in floor_groups)
+            if has_multi_view:
+                msg += " with multi-view deduplication"
+            st.success(msg)
         st.markdown("---")
 
         # ─── Key Metrics ──────────────────────────────────────────────────────────
