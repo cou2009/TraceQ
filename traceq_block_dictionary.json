@@ -428,9 +428,9 @@
     },
     "flow_bar": {
       "patterns": ["FLOW\\s*BAR", "S/?R\\s*FLOW\\s*BAR", "FLOW\\s*BAR.*RECESSED", "FB-?\\d+", "\\bFB\\b"],
-      "count_method": "count_occurrences",
-      "confidence": 0.5,
-      "notes": "Per Nestor: can be polylines, blocks, or annotations. Patterns expanded to catch FB abbreviations and various spacing. If count still low, flow bars may be drawn as polylines without text labels."
+      "count_method": "count_nos_sr",
+      "confidence": 0.6,
+      "notes": "v1.7: Changed to count_nos_sr — parses embedded quantities from MTEXT annotations. Format: 'S/R FLOW BAR ... Xnos.' where X=units per location, S/R=supply+return (×2). Proven: S5 24×4×2=192 (BOQ=192), S6 86×6×2=1032 (BOQ=1032). Falls back to 1×1 if nos/S/R not found in text."
     },
     "plenum_box": {
       "patterns": ["PLENUM BOX", "PLENUM\\s+BOX.*SIZE"],

@@ -1130,13 +1130,13 @@ class EquipmentDetector:
         results = defaultdict(lambda: {'items': [], 'count': 0, 'source': 'tier3_mtext', 'confidence': 0.6})
         pattern_defs = self.config.mtext_patterns
 
-        # Combine all text content
-        all_text = []
+        # Collect individual text entities AND combined string
+        individual_texts = []
         for mt in parser.mtext_entities:
-            all_text.append(mt['text'])
+            individual_texts.append(mt['text'])
         for t in parser.text_entities:
-            all_text.append(t['text'])
-        combined = '\n'.join(all_text)
+            individual_texts.append(t['text'])
+        combined = '\n'.join(individual_texts)
 
         for equip_type, pdef in pattern_defs.items():
             patterns = pdef.get('patterns', [])
@@ -1164,6 +1164,35 @@ class EquipmentDetector:
                 # Use max across patterns (not sum) to avoid double-counting
                 # when overlapping patterns match the same text
                 count = max_occurrences
+            elif method == 'count_nos_sr':
+                # Parse embedded quantities from MTEXT annotations.
+                # Format: "S/R FLOW BAR ... Xnos." where X = units per location.
+                # "S/R" = supply/return → multiply by 2.
+                # Formula: Σ(nos_value × sr_multiplier) for each matching entity.
+                # Proven on S5 (24×4×2=192) and S6 (86×6×2=1032).
+                count = 0
+                for txt in individual_texts:
+                    # Check if this text entity matches any of the patterns
+                    entity_matches = False
+                    for pattern in patterns:
+                        try:
+                            if re.search(pattern, txt, re.IGNORECASE):
+                                entity_matches = True
+                                break
+                        except re.error:
+                            continue
+                    if not entity_matches:
+                        continue
+
+                    # Extract "Xnos" quantity (e.g., "4nos", "6nos", "4 nos")
+                    nos_match = re.search(r'(\d+)\s*nos', txt, re.IGNORECASE)
+                    nos_value = int(nos_match.group(1)) if nos_match else 1
+
+                    # Check for S/R (supply/return) multiplier
+                    sr_match = re.search(r'\bS\s*/\s*R\b', txt, re.IGNORECASE)
+                    sr_multiplier = 2 if sr_match else 1
+
+                    count += nos_value * sr_multiplier
             else:
                 count = len(matches)
 
