@@ -438,6 +438,12 @@
       "confidence": 0.4,
       "notes": "Per Nestor (Mar 12): 96 plenum boxes in S5, measured in sqm not nos. Often incorporated into supply air duct quantity in conventional takeoff."
     },
+    "fahu": {
+      "patterns": ["FAHU-\\d+", "FAHU\\s*-\\s*\\d+[A-Z]?"],
+      "count_method": "count_unique_labels",
+      "confidence": 0.7,
+      "notes": "v1.7: Fresh Air Handling Unit. Detects FAHU unit labels (e.g., FAHU-1, FAHU - 01B). Uses count_unique_labels to count distinct unit identifiers. Excludes VRF-FAHU-ODU patterns (outdoor unit, not FAHU itself). Verified: S2 FAHU-1=1 (BOQ=1), S1 FAHU-01B=1 (BOQ=1)."
+    },
     "extract_diffuser": {
       "patterns": ["\\bEAD\\b", "\\bE\\.?A\\.?D\\b", "EXTRACT AIR DIFF", "EXTRACT.*DIFF", "EXAUST.*DIFF"],
       "count_method": "count_occurrences",
