@@ -2015,6 +2015,13 @@ class TraceQEngine:
         print(f"[TraceQ] Detected: {total:,} equipment items across "
               f"{len(merged)} categories")
 
+        # Step 3b: Spatial dedup — detect and handle duplicate layouts in single file
+        merged = self._apply_spatial_dedup(merged, parser)
+
+        # Update detection with deduped merged results
+        detection['merged'] = merged
+        total = sum(v.get('count', 0) for v in merged.values())
+
         # Step 4: Validate
         print(f"[TraceQ] Validating...")
         validation = self.validator.validate(merged)
@@ -2022,6 +2029,197 @@ class TraceQEngine:
         print(f"[TraceQ] Validation: {status}, {len(validation[2])} warnings")
 
         return AnalysisResult(filepath, parser, detection, validation)
+
+    def _apply_spatial_dedup(self, merged, parser):
+        """
+        Per-equipment-type spatial deduplication for single DXF files that
+        contain duplicate floor plan layouts drawn side-by-side in model space.
+
+        Common in MEP drawings where AC and VE views of the same floors are
+        composited into a single model space. Equipment gets double-counted
+        because the same items appear at two spatial locations.
+
+        Approach: For each equipment type with count > 1, look up the X-positions
+        of its source entities (blocks for Tier 2, MTEXT for Tier 3, items for
+        Tier 1). If those positions form two distinct spatial clusters (largest
+        gap > 40% of the equipment's X-range), take the MAX cluster count.
+
+        This is per-equipment (not global), so it correctly handles:
+        - Equipment that only exists on one side (no false dedup)
+        - Files with complex multi-floor tiling (no global threshold needed)
+        - Mixed detection sources across equipment types
+        """
+        # Build lookup: block_name → list of X-coordinates from parser inserts
+        block_positions = {}
+        for ins in parser.inserts:
+            name = ins.get('name', '').upper()
+            x = ins.get('x')
+            if x is not None:
+                if name not in block_positions:
+                    block_positions[name] = []
+                block_positions[name].append(x)
+
+        # Build lookup: collect MTEXT/TEXT with positions for Tier 3
+        mtext_entries = []  # list of (text, x)
+        for mt in parser.mtext_entities:
+            x = mt.get('x')
+            txt = mt.get('text', '')
+            if x is not None and txt:
+                mtext_entries.append((txt, x))
+        for t in parser.text_entities:
+            x = t.get('x')
+            txt = t.get('text', '')
+            if x is not None and txt:
+                mtext_entries.append((txt, x))
+
+        # --- Phase 1: Detect gap positions per equipment type ---
+        # For each type, find the X-positions and the largest gap.
+        equip_gaps = {}  # equip_type → (gap_position, gap_ratio, x_positions)
+
+        for equip_type, data in merged.items():
+            items = data.get('items', [])
+            source = data.get('source', '')
+            old_count = data.get('count', 0)
+
+            if old_count <= 1:
+                continue
+
+            x_positions = []
+
+            if source == 'tier1_layer':
+                x_positions = [item.get('x') for item in items
+                               if item.get('x') is not None]
+            elif source == 'tier2_block':
+                for item in items:
+                    block_name = item.get('block_name', '').upper()
+                    x_positions.extend(block_positions.get(block_name, []))
+            elif source == 'tier3_mtext':
+                for item in items:
+                    detection_str = item.get('detection', '')
+                    pat_str = detection_str.split(':', 1)[-1] if ':' in detection_str else ''
+                    if not pat_str:
+                        continue
+                    try:
+                        pat_re = re.compile(pat_str, re.IGNORECASE)
+                    except re.error:
+                        continue
+                    for txt, x in mtext_entries:
+                        if pat_re.search(txt):
+                            x_positions.append(x)
+
+            # Need at least 6 positioned items to reliably detect spatial clusters.
+            # With fewer items (e.g., 4 split 2/2), it's too ambiguous to
+            # distinguish "duplicated layout" from "different floor locations".
+            if len(x_positions) < 6:
+                continue
+
+            x_positions.sort()
+            x_range = x_positions[-1] - x_positions[0]
+            if x_range < 1.0:
+                continue
+
+            max_gap = 0
+            gap_pos = 0
+            for i in range(1, len(x_positions)):
+                gap = x_positions[i] - x_positions[i - 1]
+                if gap > max_gap:
+                    max_gap = gap
+                    gap_pos = (x_positions[i - 1] + x_positions[i]) / 2
+
+            gap_ratio = max_gap / x_range
+            if gap_ratio >= 0.40:
+                # Check symmetry: both sides should have roughly similar counts.
+                # True layout duplication produces ~equal groups.
+                # Different floors produce asymmetric groups (e.g., 16 vs 8).
+                left_n = sum(1 for x in x_positions if x < gap_pos)
+                right_n = sum(1 for x in x_positions if x >= gap_pos)
+                if left_n > 0 and right_n > 0:
+                    symmetry = min(left_n, right_n) / max(left_n, right_n)
+                else:
+                    symmetry = 0
+                equip_gaps[equip_type] = (gap_pos, gap_ratio, x_positions, symmetry)
+
+        # --- Phase 2: Confirm dual layout by consensus ---
+        # Multiple equipment types must agree on a similar gap position.
+        # Group gap positions that are within 20% of the drawing's total X-range.
+        if len(equip_gaps) < 2:
+            return merged
+
+        # Get total drawing X-range from all inserts
+        all_insert_x = [ins.get('x', 0) for ins in parser.inserts if ins.get('x') is not None]
+        if not all_insert_x:
+            return merged
+        drawing_range = max(all_insert_x) - min(all_insert_x)
+        tolerance = drawing_range * 0.20 if drawing_range > 0 else 1.0
+
+        # Cluster gap positions — only types with symmetric groups (ratio >= 0.70)
+        # contribute to consensus. Asymmetric splits (e.g., 16/8) indicate
+        # different floor counts, not layout duplication.
+        gap_positions = [(et, gp) for et, (gp, _, _, sym) in equip_gaps.items()
+                         if sym >= 0.70]
+        gap_positions.sort(key=lambda x: x[1])
+
+        best_cluster = []
+        for i, (et_i, gp_i) in enumerate(gap_positions):
+            cluster = [(et_i, gp_i)]
+            for j, (et_j, gp_j) in enumerate(gap_positions):
+                if i != j and abs(gp_i - gp_j) <= tolerance:
+                    cluster.append((et_j, gp_j))
+            if len(cluster) > len(best_cluster):
+                best_cluster = cluster
+
+        # Need at least 3 equipment types agreeing on the same gap.
+        # Two types can coincidentally split at the same position (e.g., two
+        # equipment types on opposite sides of a building). Three types
+        # agreeing is strong evidence of actual layout duplication.
+        if len(best_cluster) < 3:
+            return merged
+
+        # Compute consensus gap position (average of the cluster)
+        confirmed_gap = sum(gp for _, gp in best_cluster) / len(best_cluster)
+        agreeing_types = {et for et, _ in best_cluster}
+
+        print(f"[TraceQ] Spatial dedup: dual layout confirmed by {len(agreeing_types)} "
+              f"equipment types at X≈{confirmed_gap:.0f}")
+
+        # --- Phase 3: Apply dedup using confirmed gap ---
+        deduped = {}
+        for equip_type, data in merged.items():
+            if equip_type not in equip_gaps:
+                deduped[equip_type] = data
+                continue
+
+            gap_pos, gap_ratio, x_positions, symmetry = equip_gaps[equip_type]
+
+            # Only apply dedup if THIS type's gap aligns with the confirmed gap
+            if abs(gap_pos - confirmed_gap) > tolerance:
+                deduped[equip_type] = data
+                continue
+
+            left_n = sum(1 for x in x_positions if x < confirmed_gap)
+            right_n = sum(1 for x in x_positions if x >= confirmed_gap)
+
+            if left_n == 0 or right_n == 0:
+                deduped[equip_type] = data
+                continue
+
+            old_count = data.get('count', 0)
+            new_count = max(left_n, right_n)
+
+            deduped[equip_type] = dict(data)
+            deduped[equip_type]['count'] = new_count
+            deduped[equip_type]['spatial_dedup'] = f'MAX({left_n}, {right_n})={new_count}'
+
+            if new_count != old_count:
+                print(f"[TraceQ]   {equip_type}: {old_count}→{new_count} "
+                      f"(left={left_n}, right={right_n})")
+
+        # Copy any types that weren't in equip_gaps
+        for equip_type, data in merged.items():
+            if equip_type not in deduped:
+                deduped[equip_type] = data
+
+        return deduped
 
     # ── MULTI-FILE ANALYSIS WITH DEDUP ────────────────────────────────────────
 
