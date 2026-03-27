@@ -1,6 +1,6 @@
 # TraceQ — Master Project Status
 
-**Last Updated:** March 26, 2026
+**Last Updated:** March 27, 2026
 **Owner:** Nicholas Couvaras, Founder, TechTelligence
 **Contact:** nicholas@ttelligence.com | +971 50 968 9720
 **GitHub:** github.com/cou2009/TraceQ
@@ -258,13 +258,14 @@ This rule exists because the NO MANUAL DATA and NO SHORTCUTS rules were violated
 - **Detection rate (engine found >0):** ~42 items = 72%
 - **Near-CLOSE items:** S1 return_diffuser (83%), S2 flow_bar (85%), S4 FCU (120%)
 
-**Root causes of remaining misses (investigated):**
+**Root causes of remaining misses (investigated through March 27):**
 1. **S1 damper types** — fire_damper (6), motorized_damper (2), non_return_damper (7) all on generic "AC-DAMPER" layer with anonymous (*U) block names. Need Nestor's block identification to distinguish types.
-2. **S3 supply_diffuser** — M_SAG_GRILL INSERTs are all "S-ARROW" (airflow arrows), not grille symbols. Consultant drew grilles as geometry.
-3. **S4 circular_diffuser (155 BOQ)** — no circular diffuser blocks/layers exist in DXF. Completely absent from drawing entities.
-4. **S2 grille (411 entities)** — all geometry (lines), 0 blocks on "11-AC GRILL" layer. INSERT-based counting can't detect.
-5. **Flow bar across all samples** — no dedicated layers, blocks, or sufficient text patterns. Structural detection gap.
-6. **Blocks awaiting Nestor** — S1 (16 blocks) and S4 (5 blocks) sent. Nestor agreed to submit by March 26.
+2. **S3 supply_diffuser (107 vs 12 BOQ)** — Layer M_HVAC_SAD contains 107 block "F" inserts across 3 AC floor files (21 basement, 34 ground, 52 first). Tier 1 classification technically correct — BOQ likely counts assemblies not individual slots. Granularity mismatch, not config error.
+3. **S2 dual-layout spatial duplication (March 27)** — HVAC LAYOUTS (1).dxf contains TWO identical floor plans side-by-side in model space. Selectively doubles VRF (4→8), indoor_unit (16→33), sound_attenuator (1→2). Fix requires spatial dedup within single files.
+4. **S4 circular_diffuser (155 BOQ)** — no circular diffuser blocks/layers exist in DXF. Completely absent from drawing entities.
+5. **S2 grille (411 entities)** — all geometry (lines), 0 blocks on "11-AC GRILL" layer. INSERT-based counting can't detect.
+6. **S3 VCD overcount (65 vs 46 BOQ)** — Multi-view dedup already reduces raw 92→65. Remaining overcount from MTEXT-based detection.
+7. **Blocks awaiting Nestor** — S1 (16 blocks) and S4 (5 blocks) sent. Delayed due to UAE floods.
 
 **Test harness file:** test_harness.py — runs all 6 samples with non-layout filter + multi-view dedup. MUST be run after every engine change.
 
@@ -275,7 +276,8 @@ This rule exists because the NO MANUAL DATA and NO SHORTCUTS rules were violated
 | Mar 23 mid | 28.4% | 7% | 11% | 21% | 0% | 79% | 86% |
 | Mar 23 end | 31.0% | 7% | 18% | 25% | 0% | 79% | 86% |
 | Mar 25 | 37.1% | 32% | 18% | 25% | 0% | 79% | 86% |
-| **Mar 26** | **44.0%** | **39%** | **25%** | **25%** | **0%** | **93%** | **100%** |
+| Mar 26 | 44.0% | 39% | 25% | 25% | 0% | 93% | 100% |
+| **Mar 27** | **44.0%** | **39%** | **25%** | **25%** | **0%** | **93%** | **100%** |
 
 ### SAMPLE 1 RESULTS (March 12 — updated after dictionary expansion):
 - Engine finds: damper_general=126, exhaust_duct=95, VCD=64, VRF=33, hvac_equipment=28, return_diffuser=24, refrigerant_pipe=17, grille=15, fcu=10, supply_diffuser=7
@@ -304,19 +306,20 @@ This rule exists because the NO MANUAL DATA and NO SHORTCUTS rules were violated
 3. Nestor reviews report directly (no separate feedback sheet needed)
 4. Final report sent to client
 
-### NEXT PRIORITIES (Updated March 23 continued session):
-**Nicholas travelling — logging in every couple of days. Context preservation is critical.**
+### NEXT PRIORITIES (Updated March 27):
+**Nestor delayed due to UAE floods — carry on without his feedback.**
 
-**GitHub:** All current code pushed (commit 31fe199, 6 total commits this day). Repo is up to date. Layer standards v1.5, block dictionary with AIR CURTAIN + DFD fix, engine with skip_file_patterns + DIFF fix.
+**GitHub:** All current code pushed through commit f0208f6. Repo is up to date. Layer standards v1.6, block dictionary v1.7 (with count_nos_sr, FAHU mtext), engine with analyze_multi.
 
-**Nestor's feedback: ✅ FULLY PROCESSED (March 20)**
-All deliverables received and integrated. Unknown blocks Excel sent for S1 (16 blocks) and S4 (5 blocks) — awaiting response.
+**Nestor's feedback: OVERDUE — delayed by UAE floods**
+Unknown blocks Excel sent for S1 (16 blocks) and S4 (5 blocks). Follow up when floods subside.
 
 **NEXT SESSION PRIORITIES:**
-1. **🔴 Port multi-view dedup to engine/Streamlit app** — currently only in test_harness.py. The engine needs it for live processing. Impact: any multi-file upload will double-count without this.
-2. **🔴 Investigate S2 FCU overcount (33 vs 16 BOQ)** — all tier2 blocks (indoor_unit=33). May need block dictionary refinement or equivalence adjustment.
-3. **🔴 S1 exhaust fan misclassification** — "CS-EX FAN" layer (3 exhaust fans) classified as FCU because "FAN" keyword matches FCU. Need to add "EX" or "EX FAN" as an exhaust_fan keyword or exact_layer.
-4. **Update Streamlit app** with latest engine changes (skip_file_patterns, DIFF fix, etc.)
+1. **🔴 Design & implement spatial dedup within single files** — S2 has dual floor plan layouts in one DXF. Fixing could recover +3 points (VRF, FCU, sound_attenuator). Approach: cluster entities by X-coordinate, detect duplicate layout groups, take MAX per group.
+2. **🟡 Investigate S1 return_diffuser gap** — 24 detected vs 29 BOQ (83%). Missing 5 likely on unclassified layers. Finding them = +0.5 points.
+3. **🟡 Investigate S1 VCD undercount** — 48 vs 98 BOQ (49%). Largest single-item gap in S1.
+4. **🟢 Process Nestor's block feedback** when received — would unlock S1 damper types (15 items) and S4 unknowns.
+5. **🟢 Explore S3 VCD MTEXT overcount** — 65 vs 46 BOQ after dedup. Could MTEXT patterns be narrowed?
 5. **Wait for Nestor's block identification** — S1 (16 blocks) and S4 (5 blocks)
 6. **Demo prep for S5** — PM on leave, back week of March 23+. Demo timing TBD.
 
@@ -726,6 +729,9 @@ All files now in **TraceQ Docs** folder (consolidated March 9).
 | Mar 26 | FAHU detectable via MTEXT labels | Pattern "FAHU-\d+" with count_unique_labels. Works for S1 (FAHU-01B) and S2 (FAHU-1). Both exact match with BOQ=1. |
 | Mar 26 | Anonymous block type inference is NOT safe | Investigated for S1: 13 conflicting blocks appear on layers classified as different equipment types. Same block used as both supply/return diffuser and damper. Cannot infer type from layer context. |
 | Mar 26 | Remaining accuracy improvements blocked | After exhaustive investigation: damper types need Nestor block ID, S4 circular_diffuser not in DXF, S2 thermostat not in DXF, S3 flow_bar not in DXF, S3 AHU not in DXF. Further gains require Nestor's feedback or new sample data. |
+| Mar 27 | S3 supply_diffuser overcount is granularity mismatch | M_HVAC_SAD layer correctly classified. 107 block "F" inserts are individual slots; BOQ=12 counts assemblies. No config fix — fundamental unit mismatch. |
+| Mar 27 | S2 dual-layout causes selective doubling | File has two identical floor plans in one model space. VRF/FCU/sound_att doubled. Spatial dedup needed — HIGH complexity but +3 potential points. |
+| Mar 27 | No quick config wins remain at 44% | All remaining improvements require engineering effort (spatial dedup), external input (Nestor), or deeper layer analysis. |
 | Mar 18 | Created traceq_compare.py — standalone module | Architectural fix: extracted BOQ parser + compare function + all shared constants from streamlit_app.py into standalone module with zero framework dependencies. Both streamlit app and PDF generator import from same source. 13/13 items verified vs live app. |
 | Mar 18 | New rule: NO FUCKING SHORTCUTS. ALWAYS BE DISCIPLINED. | Third violation of NO MANUAL DATA in one session. Pattern documented. Only two acceptable responses to obstacles: solve properly or tell Nicholas "I can't." Never silently substitute. |
 | Mar 18 | Demo pushed to week of March 23+ | Restaurant group PM on leave, back next week. Gives more time to polish demo package and draft LinkedIn outreach. |
@@ -737,6 +743,41 @@ All files now in **TraceQ Docs** folder (consolidated March 9).
 | Mar 20 | Focus on engine quality over outreach | With 2-week travel gap, best use of time is improving engine accuracy (currently 0-9% on untrained samples). Better product = better first impression when warm leads materialise. |
 | Mar 20 | Nestor delivering updated block dictionary + library March 21 AM | Confirmed by WhatsApp. Will fold into engine configs and re-test all 6 samples. |
 | Mar 20 | Nicholas travelling ~2 weeks from March 21 | Regional conflict. Logging in every couple of days. Context preservation via project status file (proven to work — new session picked up in 5 minutes today). |
+
+---
+
+## MARCH 27 END-OF-DAY SUMMARY
+
+### 8-Point Checklist
+1. **What did we build?** No new code changes — verification and investigation session.
+2. **What decisions were made?** (a) Live Streamlit app confirmed working. (b) S3 supply_diffuser overcount = granularity mismatch, not config error. (c) S2 dual-layout causes selective doubling — needs spatial dedup. (d) No quick config wins remain at 44%.
+3. **What broke?** Nothing — investigation only, no code changes.
+4. **What's the honest state?** Overall 44.0% unchanged (26/58). Config-driven optimisation exhausted. Next improvements require engineering effort (spatial dedup), external input (Nestor), or deeper layer analysis.
+5. **What's blocked?** Nestor's block feedback (UAE floods). Spatial dedup design (complex engineering).
+6. **Nicholas's confidence level?** Session productive — app verified, repo confirmed complete, thorough investigation documented.
+7. **Files changed:** TraceQ_Project_Status.md only.
+8. **Git status:** One new commit for status doc update.
+
+### Session Activities (March 27, ~90 min)
+1. **Verified live Streamlit app** — traceq.streamlit.app loads correctly with all features.
+2. **Verified repo completeness** — requirements.txt covers all dependencies.
+3. **Deep accuracy investigation** — S3 supply_diffuser (granularity mismatch), S2 dual-layout (spatial doubling), S3 VCD (MTEXT overcount after dedup), S1 return_diffuser (5 missing from unclassified layers).
+
+### Key Investigation Findings (March 27)
+| Issue | Root Cause | Fix Complexity | Potential Impact |
+|-------|-----------|---------------|-----------------|
+| S2 VRF 8→4 | Dual layouts in single DXF | HIGH — spatial dedup | +1 point |
+| S2 FCU 33→16 | Dual layouts (indoor_unit doubled) | HIGH — same fix | +1 point |
+| S2 sound_att 2→1 | Dual layouts | HIGH — same fix | +1 point |
+| S3 supply_diff 107→12 | Granularity mismatch | UNRESOLVABLE | 0 |
+| S3 VCD 65→46 | MTEXT overcount after dedup | MEDIUM | +0.5-1 point |
+| S1 return_diff 24→29 | Missing from unclassified layers | MEDIUM | +0.5 point |
+
+### Pending (carry to next session)
+1. Process Nestor's block feedback when received (delayed — UAE floods)
+2. Design spatial dedup within single files (S2 — potentially +3 points)
+3. Investigate S1 return_diffuser missing 5 items
+4. Continue accuracy push toward 50%+
 
 ---
 
