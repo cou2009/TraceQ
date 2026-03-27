@@ -228,12 +228,12 @@ This rule exists because the NO MANUAL DATA and NO SHORTCUTS rules were violated
 | Sample | Files | Quick Scan | Match Score | FPs | Key Issues |
 |--------|-------|-----------|-------------|-----|------------|
 | S1 | 6 DXF (3 skipped) | 23.9% LOW | **39% (6/14)** | 4 | air_curtain=6 MATCH, exhaust_fan=3 MATCH, fahu=1 MATCH, supply_diffuser=56 MATCH, outdoor_unit=2 MATCH, indoor_unit=21 CLOSE. return_diffuser=24 vs 29 (83%). Still missing louver, motorized_damper, non_return_damper, sound_attenuator, fire_damper — blocked on Nestor's block ID |
-| S2 | 1 DXF | 54.2% MED | **25% (4/14)** | 2 | exhaust_fan=4 MATCH, VCD=167 MATCH, fahu=1 MATCH, extract_diffuser=8 CLOSE. flow_bar=28/33 (85% — just outside CLOSE). Blocked: thermostat (not in DXF), grille (geometry only) |
+| S2 | 1 DXF | 54.2% MED | **32% (4.5/14)** | 2 | exhaust_fan=4 MATCH, VCD=167 MATCH, fahu=1 MATCH, **VRF=4 MATCH (NEW — spatial dedup)**, extract_diffuser=8 CLOSE. flow_bar=28/33 (85%). Blocked: thermostat (not in DXF), grille (geometry only) |
 | S3 | 7 DXF (3 skipped) | 34.5% MED | **25% (3/12)** | 3 | VRF=16 MATCH, extract_diffuser=15 MATCH, FCU=39 CLOSE (BOQ=44). return_diffuser=15 CLOSE. VCD=65 OVER (46 BOQ). supply_diffuser=107 OVER (12 BOQ). flow_bar=0 (not in DXF). AHU=0 (not in DXF) |
 | S4 | 1 DXF | 21.7% LOW | **0% (0/4)** | 2 | VCD=169 OVER (75 BOQ). circular_diffuser (155 BOQ) not in DXF. FCU=6 vs 5 (120%). Blocked on Nestor block ID for 5 unknown blocks |
 | S5 | 1 DXF | 74.0% HIGH | **93% (6.5/7)** | 1 | supply/return_diffuser=544 MATCH, thermostat=170 MATCH, VCD=1,040 MATCH, VRF=15 MATCH, flow_bar=192 MATCH, FCU=170 CLOSE |
 | S6 | 1 DXF | 74.4% HIGH | **100% (7/7)** | 1 | FCU=102 MATCH, supply/return_diffuser=48 MATCH, thermostat=102 MATCH, VCD=1,694 MATCH, VRF=19 MATCH, flow_bar=1,032 MATCH. **PERFECT SCORE.** |
-| **TOTAL** | | | **44.0% (26/58)** | | **Up from 37.1% → 44.0% (+6.9%). Flow bar MATCH in S5/S6. FAHU MATCH in S1/S2. S6 = 100%. 11 commits total.** |
+| **TOTAL** | | | **45.7% (26.5/58)** | | **Up from 37.1% → 45.7% (+8.6%). Flow bar MATCH in S5/S6. FAHU MATCH in S1/S2. VRF spatial dedup in S2. S6 = 100%.** |
 
 **Key improvements from March 25 session (all pushed to GitHub):**
 1. **CS-EX FAN fix** (commit 7951f99) — CS-EX FAN was misclassified as FCU due to "FAN" keyword. Fixed exhaust_fan detection.
@@ -277,7 +277,7 @@ This rule exists because the NO MANUAL DATA and NO SHORTCUTS rules were violated
 | Mar 23 end | 31.0% | 7% | 18% | 25% | 0% | 79% | 86% |
 | Mar 25 | 37.1% | 32% | 18% | 25% | 0% | 79% | 86% |
 | Mar 26 | 44.0% | 39% | 25% | 25% | 0% | 93% | 100% |
-| **Mar 27** | **44.0%** | **39%** | **25%** | **25%** | **0%** | **93%** | **100%** |
+| **Mar 27** | **45.7%** | **39%** | **32%** | **25%** | **0%** | **93%** | **100%** |
 
 ### SAMPLE 1 RESULTS (March 12 — updated after dictionary expansion):
 - Engine finds: damper_general=126, exhaust_duct=95, VCD=64, VRF=33, hvac_equipment=28, return_diffuser=24, refrigerant_pipe=17, grille=15, fcu=10, supply_diffuser=7
@@ -758,10 +758,11 @@ All files now in **TraceQ Docs** folder (consolidated March 9).
 7. **Files changed:** TraceQ_Project_Status.md only.
 8. **Git status:** One new commit for status doc update.
 
-### Session Activities (March 27, ~90 min)
+### Session Activities (March 27, ~120 min)
 1. **Verified live Streamlit app** — traceq.streamlit.app loads correctly with all features.
 2. **Verified repo completeness** — requirements.txt covers all dependencies.
 3. **Deep accuracy investigation** — S3 supply_diffuser (granularity mismatch), S2 dual-layout (spatial doubling), S3 VCD (MTEXT overcount after dedup), S1 return_diffuser (5 missing from unclassified layers).
+4. **Built and deployed spatial dedup** — Three iterations to get safety right: v1 used global gap detection (failed — inserts too distributed), v2 used per-equipment clustering (false positives on exhaust_fan), v3 added symmetry check + 3-type consensus (clean results). Tested across all 6 samples.
 
 ### Key Investigation Findings (March 27)
 | Issue | Root Cause | Fix Complexity | Potential Impact |
@@ -775,9 +776,10 @@ All files now in **TraceQ Docs** folder (consolidated March 9).
 
 ### Pending (carry to next session)
 1. Process Nestor's block feedback when received (delayed — UAE floods)
-2. Design spatial dedup within single files (S2 — potentially +3 points)
-3. Investigate S1 return_diffuser missing 5 items
-4. Continue accuracy push toward 50%+
+2. Investigate S2 indoor_unit dedup (33→16 potential — AC-03 blocks need deeper analysis)
+3. Investigate S1 return_diffuser missing 5 items (24→29 gap)
+4. Investigate S1 VCD undercount (48 vs 98 — largest single gap)
+5. Continue accuracy push toward 60% target
 
 ---
 
