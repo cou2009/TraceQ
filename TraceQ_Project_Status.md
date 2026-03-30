@@ -1,6 +1,6 @@
 # TraceQ — Master Project Status
 
-**Last Updated:** March 27, 2026
+**Last Updated:** March 29, 2026
 **Owner:** Nicholas Couvaras, Founder, TechTelligence
 **Contact:** nicholas@ttelligence.com | +971 50 968 9720
 **GitHub:** github.com/cou2009/TraceQ
@@ -251,7 +251,7 @@ This rule exists because the NO MANUAL DATA and NO SHORTCUTS rules were violated
 5. **DFD confidence lowered** (commit 2b81705) — S1 DFD false positive eliminated.
 6. **Non-layout file filter + DIFF keyword fix** (commit 31fe199) — skip_file_patterns + DIFF keyword removal. S1 return_diffuser: 200% OVER → 83%.
 
-**Key metrics (March 26 mid-session):**
+**Key metrics (March 29 — unchanged since March 27):**
 - **Strict match (±5%):** 21 items = 36%
 - **CLOSE match (±15%):** 5 items = 9%
 - **Combined MATCH+CLOSE:** 26 items = 44.8%
@@ -306,22 +306,29 @@ This rule exists because the NO MANUAL DATA and NO SHORTCUTS rules were violated
 3. Nestor reviews report directly (no separate feedback sheet needed)
 4. Final report sent to client
 
-### NEXT PRIORITIES (Updated March 27):
-**Nestor delayed due to UAE floods — carry on without his feedback.**
+### NEXT PRIORITIES (Updated March 29):
+**Nestor's feedback RECEIVED March 28.** File analysed — 2 actionable equipment blocks confirmed, 14 confirmed non-equipment, 1 unanswered (SETFW4).
 
-**GitHub:** All current code pushed through commit f0208f6. Repo is up to date. Layer standards v1.6, block dictionary v1.7 (with count_nos_sr, FAHU mtext), engine with analyze_multi.
+**GitHub:** All current code pushed through commit 4291605. Repo is up to date. Layer standards v1.6, block dictionary v1.7, engine with spatial dedup.
 
-**Nestor's feedback: OVERDUE — delayed by UAE floods**
-Unknown blocks Excel sent for S1 (16 blocks) and S4 (5 blocks). Follow up when floods subside.
+**DUAL TRACK: Demo Polish (60%) + Baseline Improvement (40%)**
 
-**NEXT SESSION PRIORITIES:**
-1. **🔴 Design & implement spatial dedup within single files** — S2 has dual floor plan layouts in one DXF. Fixing could recover +3 points (VRF, FCU, sound_attenuator). Approach: cluster entities by X-coordinate, detect duplicate layout groups, take MAX per group.
-2. **🟡 Investigate S1 return_diffuser gap** — 24 detected vs 29 BOQ (83%). Missing 5 likely on unclassified layers. Finding them = +0.5 points.
-3. **🟡 Investigate S1 VCD undercount** — 48 vs 98 BOQ (49%). Largest single-item gap in S1.
-4. **🟢 Process Nestor's block feedback** when received — would unlock S1 damper types (15 items) and S4 unknowns.
-5. **🟢 Explore S3 VCD MTEXT overcount** — 65 vs 46 BOQ after dedup. Could MTEXT patterns be narrowed?
-5. **Wait for Nestor's block identification** — S1 (16 blocks) and S4 (5 blocks)
-6. **Demo prep for S5** — PM on leave, back week of March 23+. Demo timing TBD.
+**NEXT SESSION PRIORITIES (Monday March 30):**
+1. **🔴 Integrate Nestor's confirmed blocks into engine** — S4 A$Ca9fa5fff → FCU (13 count), S1 PACKAGE1300 Ls → packaged_unit (9 count). Estimated gain: +1-3 points. ~30 min coding.
+2. **🔴 Create polished/branded S5 Excel report** — Current demo report is from March 18 with outdated numbers. Need fresh version with current engine results for client demo.
+3. **🔴 Rehearse demo script with Nicholas** — Conversational script written (TraceQ_Demo_Script.docx). Needs dry run and refinement.
+4. **🟡 Investigate S1 VCD undercount** — 48 vs 98 BOQ. Largest single-item gap. Potential +3-4 points.
+5. **🟡 Investigate S2 indoor_unit dedup** — 33 detected vs 16 BOQ. Spatial dedup needs tuning for AC-03 blocks.
+6. **🟢 Follow up with Nestor on SETFW4** — 30 count on M_AC_EQUIP layer in S1. He left it blank.
+7. **🟢 Investigate S1 return_diffuser gap** — 24 vs 29. Missing 5 from unclassified layers.
+
+**60% TARGET PATH:**
+Current: 45.7% (26.5/58). Need +8-9 points.
+- Nestor blocks integration: +1-3 points → ~48-49%
+- S1 VCD fix: +3-4 points → ~52-55%
+- S2 indoor_unit dedup: +1-2 points → ~55-57%
+- S3 VCD narrowing: +0.5-1 point → ~57-58%
+- Stretch: S1 return_diffuser + other small gains → 60%+
 
 **COMPLETED March 23 (continued session):**
 - ✅ **Non-layout drawing filter** — added skip_file_patterns config to exclude schedule/detail/schematic DXFs from equipment counting. S1 schematic was adding 84 false items (8 VCDs, 11 dampers, 43 exhaust ducts). S3 details sheet adding 9 false items. Universal, config-driven. Commit 31fe199.
@@ -732,6 +739,10 @@ All files now in **TraceQ Docs** folder (consolidated March 9).
 | Mar 27 | S3 supply_diffuser overcount is granularity mismatch | M_HVAC_SAD layer correctly classified. 107 block "F" inserts are individual slots; BOQ=12 counts assemblies. No config fix — fundamental unit mismatch. |
 | Mar 27 | S2 dual-layout causes selective doubling | File has two identical floor plans in one model space. VRF/FCU/sound_att doubled. Spatial dedup needed — HIGH complexity but +3 potential points. |
 | Mar 27 | No quick config wins remain at 44% | All remaining improvements require engineering effort (spatial dedup), external input (Nestor), or deeper layer analysis. |
+| Mar 28 | Nestor's block feedback received and analysed | 2 actionable blocks (S4 FCU, S1 packaged unit), 14 confirmed non-equipment, 1 unanswered (SETFW4). Integration deferred to Monday. |
+| Mar 29 | Dual-track approach agreed: 60% demo polish / 40% baseline | Nicholas concerned about going in circles. Demo presentation to his dad felt rusty. Agreed to polish the S5 demo storyline alongside baseline improvements. |
+| Mar 29 | Demo script written — 5-minute pitch for HVAC subcontractors | Conversational format, 6 beats (pain point → inputs → exec summary → comparison → proof → close). Saved as TraceQ_Demo_Script.docx. |
+| Mar 29 | 60% target realistic path mapped out | Current 45.7% → need +8-9 points. Nestor blocks (+1-3), S1 VCD (+3-4), S2 indoor_unit (+1-2), S3 VCD (+0.5-1). Honest assessment: achievable but needs focused engineering. |
 | Mar 18 | Created traceq_compare.py — standalone module | Architectural fix: extracted BOQ parser + compare function + all shared constants from streamlit_app.py into standalone module with zero framework dependencies. Both streamlit app and PDF generator import from same source. 13/13 items verified vs live app. |
 | Mar 18 | New rule: NO FUCKING SHORTCUTS. ALWAYS BE DISCIPLINED. | Third violation of NO MANUAL DATA in one session. Pattern documented. Only two acceptable responses to obstacles: solve properly or tell Nicholas "I can't." Never silently substitute. |
 | Mar 18 | Demo pushed to week of March 23+ | Restaurant group PM on leave, back next week. Gives more time to polish demo package and draft LinkedIn outreach. |
@@ -757,6 +768,30 @@ All files now in **TraceQ Docs** folder (consolidated March 9).
 6. **Nicholas's confidence level?** Session productive — app verified, repo confirmed complete, thorough investigation documented.
 7. **Files changed:** TraceQ_Project_Status.md only.
 8. **Git status:** One new commit for status doc update.
+
+### Session Activities (March 29, ~30 min)
+1. **Baseline check** — Ran test harness. No improvement since March 27 (45.7%). Confirmed Nestor's feedback not yet integrated into engine.
+2. **Honest assessment of Nestor's feedback impact** — Estimated +1-3 points once integrated. S4 FCU block is the main win. Not sufficient alone for 60% — need detection logic fixes on S1/S2/S3.
+3. **Strategic planning discussion** — Nicholas feeling behind on 2-week plan and concerned about going in circles. Agreed on dual-track approach: 60% demo polish / 40% baseline improvement.
+4. **Demo script written** — Full conversational script for 5-minute client pitch to HVAC subcontractors. 6-beat structure: Pain Point → Inputs → Exec Summary → Line-by-Line Comparison → Trace ID Proof → Close. Includes Q&A handling section. Saved as TraceQ_Demo_Script.docx.
+5. **Decision: S5 demo needs polished Excel report** — Current report from March 18 has outdated numbers. Will regenerate with current engine output.
+6. **Nicholas presented demo to his dad (architect)** — feedback was it felt rusty and didn't flow well. This drove the focus on demo polish.
+
+### Session Activities (March 28, ~15 min)
+1. **Nestor's block feedback received** — File uploaded: TraceQ_Unknown_Blocks_For_Nestor.xlsx
+2. **Quick analysis of feedback:**
+   - S1 (16 blocks): 1 confirmed equipment (PACKAGE1300 Ls = packaged AC unit, 9 count), 1 confirmed equipment we already detect (AIR CURTAIN), 12 confirmed NOT equipment (duct fittings, pipe fittings, fire alarm, annotations), 1 unable to identify (*X142 on detail sheet we skip), 1 NO ANSWER (SETFW4, 30 count on M_AC_EQUIP — needs follow-up)
+   - S4 (5 blocks): 1 confirmed equipment (A$Ca9fa5fff = FCU/indoor unit, 13 count), 1 thermostat (not in BOQ), 3 chilled water fittings (not equipment)
+3. **Assessment:** Helpful but not the game-changer we hoped. Main win is S4 FCU unlock. Processing deferred to Monday per Nicholas.
+
+### Pending (carry to next session — Monday March 30)
+1. Integrate Nestor's 2 confirmed blocks into engine config (S4 FCU + S1 packaged unit)
+2. Create polished/branded S5 Excel report for demo
+3. Rehearse and refine demo script with Nicholas
+4. Investigate S1 VCD undercount (48 vs 98 — largest single gap)
+5. Investigate S2 indoor_unit spatial dedup tuning
+6. Follow up with Nestor on SETFW4 (30 count, no answer)
+7. Push all changes to GitHub
 
 ### Session Activities (March 27, ~120 min)
 1. **Verified live Streamlit app** — traceq.streamlit.app loads correctly with all features.
