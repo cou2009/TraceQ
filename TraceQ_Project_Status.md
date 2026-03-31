@@ -1,6 +1,6 @@
 # TraceQ — Master Project Status
 
-**Last Updated:** March 29, 2026
+**Last Updated:** March 30, 2026
 **Owner:** Nicholas Couvaras, Founder, TechTelligence
 **Contact:** nicholas@ttelligence.com | +971 50 968 9720
 **GitHub:** github.com/cou2009/TraceQ
@@ -743,6 +743,9 @@ All files now in **TraceQ Docs** folder (consolidated March 9).
 | Mar 29 | Dual-track approach agreed: 60% demo polish / 40% baseline | Nicholas concerned about going in circles. Demo presentation to his dad felt rusty. Agreed to polish the S5 demo storyline alongside baseline improvements. |
 | Mar 29 | Demo script written — 5-minute pitch for HVAC subcontractors | Conversational format, 6 beats (pain point → inputs → exec summary → comparison → proof → close). Saved as TraceQ_Demo_Script.docx. |
 | Mar 29 | 60% target realistic path mapped out | Current 45.7% → need +8-9 points. Nestor blocks (+1-3), S1 VCD (+3-4), S2 indoor_unit (+1-2), S3 VCD (+0.5-1). Honest assessment: achievable but needs focused engineering. |
+| Mar 30 | Nestor's feedback = zero score impact (verified) | Previous +1-3 estimate was wrong. S4 FCU block (13) exceeds BOQ (5). S1 packaged unit not in BOQ. Violated "don't assume" rule. |
+| Mar 30 | New rule: no score estimates without verification | Must run actual numbers before giving estimates. Say "I don't know yet" instead of guessing. |
+| Mar 30 | Demo script needs complete rewrite for harder sales energy | Current script educates. Needs to agitate — lead with fear of loss, close with urgency. Nicholas wants "where do I sign" energy. |
 | Mar 18 | Created traceq_compare.py — standalone module | Architectural fix: extracted BOQ parser + compare function + all shared constants from streamlit_app.py into standalone module with zero framework dependencies. Both streamlit app and PDF generator import from same source. 13/13 items verified vs live app. |
 | Mar 18 | New rule: NO FUCKING SHORTCUTS. ALWAYS BE DISCIPLINED. | Third violation of NO MANUAL DATA in one session. Pattern documented. Only two acceptable responses to obstacles: solve properly or tell Nicholas "I can't." Never silently substitute. |
 | Mar 18 | Demo pushed to week of March 23+ | Restaurant group PM on leave, back next week. Gives more time to polish demo package and draft LinkedIn outreach. |
@@ -768,6 +771,27 @@ All files now in **TraceQ Docs** folder (consolidated March 9).
 6. **Nicholas's confidence level?** Session productive — app verified, repo confirmed complete, thorough investigation documented.
 7. **Files changed:** TraceQ_Project_Status.md only.
 8. **Git status:** One new commit for status doc update.
+
+### Session Activities (March 30, ~30 min)
+1. **Integrated Nestor's block feedback into dictionary v1.2** — Added 3 confirmed equipment blocks (A$Ca9fa5fff=FCU/S4, PACKAGE1300 Ls=packaged_unit/S1, A$C20063A56=thermostat/S4). Added 15 confirmed non-equipment to skip_blocks. Pushed as commit ec25bde.
+2. **CRITICAL FINDING: Nestor's feedback does NOT improve baseline score.** S4 FCU block gives 13 where BOQ says 5 (already OVER). S1 packaged unit has no BOQ line item (just a false positive). Previous estimate of +1-3 points was WRONG — should have verified BOQ mapping before giving a number. Score remains 45.7%.
+3. **Rule added: No score estimates without running actual numbers first.** If can't verify in the moment, say "I don't know yet" — not a guess wrapped in confidence. Nicholas rightly called this out as violating the "don't assume" rule.
+4. **Demo script feedback from Nicholas:** Current script educates but doesn't agitate. Needs to create urgency and fear of loss — "where do I sign" energy, not "pretty cool right?" energy. Key changes needed: open with the kill shot (AED 700K found in 60 seconds), make missing items the dagger (scope you'll install but haven't priced), close with the question that keeps them up at night.
+5. **Demo rewrite agreed** — Full script rewrite with harder-hitting sales energy. Pending for next session.
+
+### Pending (carry to next session)
+1. **🔴 Rewrite demo script with harder sales energy** — lead with fear, prove with data, close with urgency
+2. **🔴 Create polished/branded S5 Excel report** — current report from March 18 has outdated numbers
+3. **🟡 S1 VCD undercount fix** (48 vs 98) — largest single lever, worth +3-4 points
+4. **🟡 S2 indoor_unit dedup** (33 vs 16) — worth +1-2 points
+5. **🟢 Follow up with Nestor on SETFW4** (30 count, M_AC_EQUIP layer, no answer)
+6. **🟢 S4 circular_diffuser** — *U2164 (125 count) or *U1064 (95 count) likely candidates. Need Nestor or visual ID.
+
+### Decisions Log (March 30)
+- Nestor's feedback confirmed as zero score impact after BOQ mapping verification
+- New rule: no score estimates without running actual numbers
+- Demo needs complete tone shift: from educational walkthrough to fear-of-loss sales pitch
+- Real baseline gains come from detection logic (S1 VCD, S2 indoor_unit), not dictionary additions
 
 ### Session Activities (March 29, ~30 min)
 1. **Baseline check** — Ran test harness. No improvement since March 27 (45.7%). Confirmed Nestor's feedback not yet integrated into engine.
