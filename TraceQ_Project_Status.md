@@ -772,26 +772,36 @@ All files now in **TraceQ Docs** folder (consolidated March 9).
 7. **Files changed:** TraceQ_Project_Status.md only.
 8. **Git status:** One new commit for status doc update.
 
-### Session Activities (March 30, ~30 min)
+### Session Activities (March 30, ~90 min)
 1. **Integrated Nestor's block feedback into dictionary v1.2** — Added 3 confirmed equipment blocks (A$Ca9fa5fff=FCU/S4, PACKAGE1300 Ls=packaged_unit/S1, A$C20063A56=thermostat/S4). Added 15 confirmed non-equipment to skip_blocks. Pushed as commit ec25bde.
 2. **CRITICAL FINDING: Nestor's feedback does NOT improve baseline score.** S4 FCU block gives 13 where BOQ says 5 (already OVER). S1 packaged unit has no BOQ line item (just a false positive). Previous estimate of +1-3 points was WRONG — should have verified BOQ mapping before giving a number. Score remains 45.7%.
-3. **Rule added: No score estimates without running actual numbers first.** If can't verify in the moment, say "I don't know yet" — not a guess wrapped in confidence. Nicholas rightly called this out as violating the "don't assume" rule.
-4. **Demo script feedback from Nicholas:** Current script educates but doesn't agitate. Needs to create urgency and fear of loss — "where do I sign" energy, not "pretty cool right?" energy. Key changes needed: open with the kill shot (AED 700K found in 60 seconds), make missing items the dagger (scope you'll install but haven't priced), close with the question that keeps them up at night.
-5. **Demo rewrite agreed** — Full script rewrite with harder-hitting sales energy. Pending for next session.
+3. **Rule added: No score estimates without running actual numbers first.** If can't verify in the moment, say "I don't know yet" — not a guess wrapped in confidence.
+4. **MAJOR STRATEGIC DISCUSSION — Positioning & Go-to-Market:**
+   - **TechTelligence** = construction tech/AI company (umbrella brand)
+   - **TraceQ** = pre-tender risk audit service (first product). Starts with HVAC, evolves to full MEP then all trades.
+   - **NOT a QS replacement** — augments workflow, doesn't replace it. "We catch what nobody's looking for."
+   - **Pricing trap identified:** Positioning on speed/turnaround makes clients benchmark against QS daily rate = commodity. Solution: position as risk mitigation, not labour substitution.
+   - **Go-to-market strategy agreed:** Ask prospects for a COMPLETED project. Deliver risk report within 3 days. They compare against their final accounts (excluding variations). If we catch real issues they experienced, that's the trust moment. Start charging from there.
+   - **Tender turnaround reality:** Subcontractors typically have 1-2 weeks to respond to tenders. TraceQ must deliver within 2-3 days to be useful within that window.
+   - **Speed + accuracy feed each other:** 60%+ baseline → less Nestor review time → faster turnaround → more projects → more revenue.
+   - **Demo needs complete rewrite** — must agitate, not educate. "Where do I sign" energy.
+5. **Accuracy improvement session** — Deep dive on S1 VCD undercount (see below).
 
 ### Pending (carry to next session)
-1. **🔴 Rewrite demo script with harder sales energy** — lead with fear, prove with data, close with urgency
+1. **🔴 Rewrite demo script with agreed positioning** — TechTelligence as construction tech/AI co, TraceQ as pre-tender risk audit, lead with completed project trust play
 2. **🔴 Create polished/branded S5 Excel report** — current report from March 18 has outdated numbers
-3. **🟡 S1 VCD undercount fix** (48 vs 98) — largest single lever, worth +3-4 points
+3. **🟡 Continue S1 VCD investigation** — results from today's session TBD
 4. **🟡 S2 indoor_unit dedup** (33 vs 16) — worth +1-2 points
 5. **🟢 Follow up with Nestor on SETFW4** (30 count, M_AC_EQUIP layer, no answer)
-6. **🟢 S4 circular_diffuser** — *U2164 (125 count) or *U1064 (95 count) likely candidates. Need Nestor or visual ID.
+6. **🟢 S4 circular_diffuser** — *U2164 (125 count) or *U1064 (95 count) likely candidates
 
 ### Decisions Log (March 30)
-- Nestor's feedback confirmed as zero score impact after BOQ mapping verification
-- New rule: no score estimates without running actual numbers
-- Demo needs complete tone shift: from educational walkthrough to fear-of-loss sales pitch
-- Real baseline gains come from detection logic (S1 VCD, S2 indoor_unit), not dictionary additions
+- TechTelligence = construction tech/AI company. TraceQ = pre-tender risk audit service.
+- Go-to-market: completed project trust play → 3-day turnaround → start charging
+- TraceQ augments QS workflow, does NOT replace it. "We catch what nobody's looking for."
+- Nestor's feedback = zero score impact (verified). New rule: no estimates without running numbers.
+- Demo rewrite needed with new positioning and harder sales energy
+- 60% baseline is critical for operational efficiency (Nestor review time + turnaround speed)
 
 ### Session Activities (March 29, ~30 min)
 1. **Baseline check** — Ran test harness. No improvement since March 27 (45.7%). Confirmed Nestor's feedback not yet integrated into engine.
