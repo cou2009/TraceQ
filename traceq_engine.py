@@ -901,11 +901,17 @@ class EquipmentDetector:
                 text_type_map[pattern] = equip_type
 
         # For each text/mtext entity, check if it matches an equipment pattern
-        # AND is near a block of the same type
+        # AND is near a block of the same type.
+        # IMPORTANT: Each block can only shadow ONE text entity. This prevents
+        # a small number of blocks from eliminating a large number of genuine
+        # text detections (e.g., 8 VCD blocks shouldn't remove 51 VCD labels).
         all_text_entities = parser.mtext_entities + parser.text_entities
 
         # Count how many text entities per type are "shadowed" by nearby blocks
         shadowed_counts = defaultdict(int)
+
+        # Track which blocks have already been used for shadowing
+        used_blocks = defaultdict(set)  # equip_type → set of (bx, by) tuples used
 
         for text_ent in all_text_entities:
             tx = text_ent.get('x', 0)
@@ -925,12 +931,15 @@ class EquipmentDetector:
             if not matched_type:
                 continue
 
-            # Is there a block of the same type within radius?
+            # Is there an UNUSED block of the same type within radius?
             block_positions = block_positions_by_type.get(matched_type, [])
             for bx, by in block_positions:
+                if (bx, by) in used_blocks[matched_type]:
+                    continue  # This block already shadowed another text
                 dist = ((tx - bx)**2 + (ty - by)**2) ** 0.5
                 if dist <= radius:
                     shadowed_counts[matched_type] += 1
+                    used_blocks[matched_type].add((bx, by))
                     break  # Only count one shadow per text entity
 
         # Adjust Tier 3 counts by subtracting shadowed text entities
@@ -1344,6 +1353,51 @@ class EquipmentDetector:
 
         # Store conflicts for the report
         self._last_conflicts = conflicts
+
+        # --- Post-merge: Reclassify damper_general using MTEXT evidence ---
+        # When Tier 1 classifies items as damper_general (ambiguous layer name
+        # like "AC-DAMPER"), check if MTEXT labels provide specific damper type.
+        # This uses text context to disambiguate generic layer classifications.
+        # Universal: works for any project where damper layers lack type specificity.
+        damper_specific_types = [
+            'volume_control_damper', 'fire_damper', 'motorized_damper', 'non_return_damper'
+        ]
+        if 'damper_general' in merged:
+            dg = merged['damper_general']
+            dg_count = dg.get('count', 0)
+            dg_source = dg.get('source', '')
+
+            if dg_count > 0 and dg_source == 'tier1_layer':
+                # Check Tier 3 for specific damper types that could reclassify
+                for specific_type in damper_specific_types:
+                    t3_specific = tier3.get(specific_type, {})
+                    t3_count = t3_specific.get('count', 0)
+                    if t3_count > 0:
+                        # MTEXT found specific damper labels — reclassify
+                        existing = merged.get(specific_type, {}).get('count', 0)
+                        reclassified_count = dg_count  # Move all damper_general to specific type
+                        new_total = existing + reclassified_count
+
+                        merged[specific_type] = {
+                            'count': new_total,
+                            'source': 'tier1_layer+tier3_reclassify',
+                            'confidence': dg.get('confidence', 0.6),
+                            'items': dg.get('items', []) + merged.get(specific_type, {}).get('items', []),
+                            'alternate_counts': {
+                                'tier1': dg_count,
+                                'tier2': merged.get(specific_type, {}).get('alternate_counts', {}).get('tier2', 0),
+                                'tier3': t3_count,
+                            },
+                            'needs_review': False,
+                            'notes': (
+                                f'Reclassified {dg_count} damper_general items as {specific_type} '
+                                f'based on {t3_count} MTEXT labels confirming type. '
+                                f'Previous Tier 2 count: {existing}. New total: {new_total}.'
+                            ),
+                        }
+                        # Remove damper_general since items have been reclassified
+                        del merged['damper_general']
+                        break  # Only reclassify to one specific type
 
         return merged
 
