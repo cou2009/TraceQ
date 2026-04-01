@@ -2273,6 +2273,99 @@ class TraceQEngine:
             if equip_type not in deduped:
                 deduped[equip_type] = data
 
+        # --- Phase 4: Apply confirmed gap to types that didn't pass Phase 1 ---
+        # Once we've confirmed a dual layout via consensus, apply it to equipment
+        # types that have enough items (≥6) and show a split at the confirmed gap,
+        # even if their individual gap_ratio was below the 0.40 threshold.
+        # CRITICAL GUARD: We must verify there's an actual gap in THIS type's
+        # positions near the confirmed gap — not just that items fall on both sides.
+        # Types spread continuously across the drawing (like VCDs on ductwork) will
+        # split at any X position but aren't duplicated.
+        for equip_type, data in list(deduped.items()):
+            if equip_type in equip_gaps:
+                continue  # Already handled in Phase 3
+
+            items = data.get('items', [])
+            source = data.get('source', '')
+            old_count = data.get('count', 0)
+            if old_count <= 1:
+                continue
+
+            # Gather X positions for this type (same logic as Phase 1)
+            x_positions = []
+            if source == 'tier1_layer':
+                x_positions = [item.get('x') for item in items if item.get('x') is not None]
+            elif source == 'tier2_block':
+                for item in items:
+                    block_name = item.get('block_name', '').upper()
+                    x_positions.extend(block_positions.get(block_name, []))
+            elif source == 'tier3_mtext':
+                for item in items:
+                    detection_str = item.get('detection', '')
+                    pat_str = detection_str.split(':', 1)[-1] if ':' in detection_str else ''
+                    if not pat_str:
+                        continue
+                    try:
+                        pat_re = re.compile(pat_str, re.IGNORECASE)
+                    except re.error:
+                        continue
+                    for txt, x in mtext_entries:
+                        if pat_re.search(txt):
+                            x_positions.append(x)
+
+            if len(x_positions) < 6:
+                continue
+
+            # GUARD: Verify there's a real gap near the confirmed gap position.
+            # Sort positions and find the actual gap size closest to confirmed_gap.
+            # If items are spread continuously (no gap), splitting is arbitrary.
+            x_sorted = sorted(x_positions)
+            x_range = x_sorted[-1] - x_sorted[0]
+            if x_range < 1.0:
+                continue
+
+            # Find the gap nearest to confirmed_gap
+            best_local_gap = 0
+            for i in range(1, len(x_sorted)):
+                mid = (x_sorted[i - 1] + x_sorted[i]) / 2
+                if abs(mid - confirmed_gap) <= tolerance:
+                    gap_size = x_sorted[i] - x_sorted[i - 1]
+                    if gap_size > best_local_gap:
+                        best_local_gap = gap_size
+
+            local_gap_ratio = best_local_gap / x_range if x_range > 0 else 0
+
+            # Require at least 0.32 gap_ratio at the confirmed position.
+            # Phase 1 uses 0.40 — this is softer because the dual layout is proven,
+            # but still requires a meaningful physical gap. Types spread along
+            # continuous ductwork (like VCDs at 0.30) show a gap but it's not
+            # dominant enough to confirm duplication.
+            if local_gap_ratio < 0.32:
+                print(f"[TraceQ]   Phase 4 SKIP {equip_type}: local_gap_ratio={local_gap_ratio:.3f} < 0.32 "
+                      f"(no real gap at confirmed position)")
+                continue
+
+            # Split at the confirmed gap position
+            left_n = sum(1 for x in x_positions if x < confirmed_gap)
+            right_n = sum(1 for x in x_positions if x >= confirmed_gap)
+
+            if left_n == 0 or right_n == 0:
+                continue
+
+            # Require reasonable symmetry (≥0.50 — softer than Phase 1's 0.70
+            # because the dual layout is already proven)
+            symmetry = min(left_n, right_n) / max(left_n, right_n)
+            if symmetry < 0.50:
+                continue
+
+            new_count = max(left_n, right_n)
+            if new_count != old_count:
+                deduped[equip_type] = dict(data)
+                deduped[equip_type]['count'] = new_count
+                deduped[equip_type]['spatial_dedup'] = f'MAX({left_n}, {right_n})={new_count} [confirmed gap]'
+                print(f"[TraceQ]   {equip_type}: {old_count}→{new_count} "
+                      f"(left={left_n}, right={right_n}, local_gap={local_gap_ratio:.3f}) [confirmed gap applied]")
+
         return deduped
 
     # ── MULTI-FILE ANALYSIS WITH DEDUP ────────────────────────────────────────
