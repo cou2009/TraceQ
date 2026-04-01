@@ -1,6 +1,6 @@
 # TraceQ — Master Project Status
 
-**Last Updated:** March 30, 2026
+**Last Updated:** April 1, 2026
 **Owner:** Nicholas Couvaras, Founder, TechTelligence
 **Contact:** nicholas@ttelligence.com | +971 50 968 9720
 **GitHub:** github.com/cou2009/TraceQ
@@ -771,6 +771,43 @@ All files now in **TraceQ Docs** folder (consolidated March 9).
 6. **Nicholas's confidence level?** Session productive — app verified, repo confirmed complete, thorough investigation documented.
 7. **Files changed:** TraceQ_Project_Status.md only.
 8. **Git status:** One new commit for status doc update.
+
+### Session Activities (April 1)
+1. **Fixed S2 Phase 4 spatial dedup regression** — Phase 4 was incorrectly deduping VCD (167→92, breaking MATCH). Root cause: checked if items split at confirmed gap but didn't verify there was an actual gap for this specific type. Fix: added local_gap_ratio guard (≥0.32). VCD restored to MATCH. Indoor_unit correctly deduped 33→18 (CLOSE). Commit 6762231.
+2. **Added NRD MTEXT pattern** — non_return_damper now detected via `\bNRD\b` labels on ventilation drawings. S1 NRD: MISS→CLOSE (8 detected vs BOQ 7, 14% off). Excluded full "NON RETURN DAMPER" text to avoid legend false positives. Block dictionary v1.3. Commit 4de4ff5.
+3. **Extensive accuracy investigation** — Analyzed all 6 samples for improvement opportunities:
+   - S4 VCD (169 vs 75): Single file, no dual layout (168/1 split). Can't fix without understanding drawing scope.
+   - S4 circular_diffuser (0 vs 155): *U2164 (125 on 3-SUPPLY-DUCT) is the top candidate but needs Nestor confirmation.
+   - S3 supply_diffuser (107 vs 12): "F" blocks on M_HVAC_SAD are duct fittings, not diffusers. Skipping doesn't help (goes MISS→still MISS).
+   - S3 VCD (94 vs 46): Exactly 2× BOQ. Reclassification SUM vs MAX explored — MAX helps S3 but hurts S1. Kept SUM.
+   - S5 FCU (170 vs 156): Tier 3 MTEXT gives perfect 156 but merge prefers Tier 2 blocks (170) via sub-type uplift.
+   - S2 flow_bar (28 vs 33): 14 "S/R FLOW BAR" labels × 2 = 28. Missing 5 not labeled on drawing.
+   - S1 return_diffuser (24 vs 29): All from ground floor. Missing 5 not on detected layers.
+4. **Score progression:** 46.6% (Mar 30) → 47.4% (Phase 4 fix) → 48.3% (NRD pattern)
+
+### Current Scorecard (April 1)
+| Sample | Score | Key Issues |
+|--------|-------|-----------|
+| S1 | 46% (6.5/14) | grille UNDER, 4 types MISS |
+| S2 | 36% (5/14) | flow_bar UNDER, 4 types MISS/OVER |
+| S3 | 25% (3/12) | VCD 2× OVER, SD 9× OVER, 6 types MISS |
+| S4 | 0% (0/4) | circular_diffuser MISS, VCD/FCU OVER |
+| S5 | 93% (6.5/7) | FCU slightly OVER (CLOSE) |
+| S6 | 100% (7/7) | Perfect |
+| **OVERALL** | **48.3%** | **Need 60% (+6.8 pts from 58 items)** |
+
+### Pending (carry to next session)
+1. **🔴 Rewrite demo script with agreed positioning** — harder sales energy, pre-tender risk audit angle
+2. **🔴 Create polished/branded S5 Excel report** — outdated numbers from March 18
+3. **🟡 S4 circular_diffuser needs Nestor** — *U2164 (125 count, 3-SUPPLY-DUCT layer) is prime candidate. Without this, S4 stays at 0%.
+4. **🟡 S3 VCD 2× overcount** — reclassification SUM/MAX tradeoff needs deeper investigation
+5. **🟡 S5 FCU CLOSE→MATCH** — Tier 3 gives perfect 156 but merge picks Tier 2 (170). Adjusting merge preference could gain 0.5 pts.
+6. **🟢 Follow up with Nestor on SETFW4** (30 count, M_AC_EQUIP layer, still no answer)
+
+### Decisions Log (April 1)
+- Phase 4 spatial dedup: local_gap_ratio ≥ 0.32 threshold protects VCD (0.304) while allowing indoor_unit (0.342)
+- NRD detection: short label `\bNRD\b` only — full text "NON RETURN DAMPER" appears in legends (false positive)
+- Reclassification kept as SUM — MAX helps S3 but regresses S1. Needs per-case logic.
 
 ### Session Activities (March 30, ~90 min)
 1. **Integrated Nestor's block feedback into dictionary v1.2** — Added 3 confirmed equipment blocks (A$Ca9fa5fff=FCU/S4, PACKAGE1300 Ls=packaged_unit/S1, A$C20063A56=thermostat/S4). Added 15 confirmed non-equipment to skip_blocks. Pushed as commit ec25bde.
