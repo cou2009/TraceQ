@@ -789,6 +789,9 @@ All files now in **TraceQ Docs** folder (consolidated March 9).
    - S2 NRD (4 vs 2), sound_attenuator (2 vs 1): BOQ quantities so small any detection looks disproportionate.
 4. **Explored S3 flow_bar (BOQ=100, currently MISS):** Found "S/RLAD" (Linear Air Diffuser) labels in S3 DXF. Count with S/R multiplier = 132 (32% over), without = 66 (34% under). Neither gives CLOSE/USEFUL. BOQ sits exactly between — interpretation uncertain.
 5. **Key realisation: engine has hit a structural ceiling at ~48%.** Most remaining items fall into 3 buckets: (a) not in DXF at all (~12 items), (b) need Nestor block confirmation (~4 items), (c) ambiguous overcounts where fixing one sample breaks another (~10 items). Pattern matching alone can't solve these.
+6. **Strategic reframe with Nicholas:** The 6 samples are training data, not the product. Goal is to build a comprehensive dictionary so that when Sample 7 arrives from a real client, the engine recognises most of what's on the drawing. Stop chasing per-sample scores, start building the library.
+7. **Comprehensive Nestor questions document created and sent.** 14 questions across 4 sections (block ID, layer conventions, BOQ gaps, drawing conventions). All questions in one place — no more back and forth. Sent as TraceQ_Nestor_Questions_April2.docx.
+8. **Git commits:** ae99bdb (tightened harness), 29bc47f (status update).
 
 ### Current Scorecard (April 2) — Honest Numbers
 | Sample | Accurate | Useful | Wrong | Miss | FPs | Nestor Saved |
@@ -809,19 +812,20 @@ All files now in **TraceQ Docs** folder (consolidated March 9).
 - **S4: BLOCKED.** 0% — entirely dependent on Nestor confirming *U2164 block = circular_diffuser.
 
 ### Pending (carry to next session)
-1. **🔴 Rewrite demo script with agreed positioning** — harder sales energy, pre-tender risk audit angle
-2. **🔴 Create polished/branded S5 Excel report** — outdated numbers from March 18
-3. **🟡 S4 circular_diffuser needs Nestor** — *U2164 (125 count, 3-SUPPLY-DUCT layer). Without this, S4 stays at 0%. ALREADY ASKED — awaiting response.
-4. **🟡 SETFW4 needs Nestor** — 30 count, M_AC_EQUIP layer. ALREADY ASKED — no answer.
-5. **🟡 Confidence flagging for overcounts** — flag WRONG items as "LOW CONFIDENCE" in reports so Nestor knows to check
-6. **🟢 Demo + report materials don't depend on accuracy ceiling — do these in parallel**
+1. **🔴 Rewrite demo script with agreed positioning** — harder sales energy, pre-tender risk audit angle, "where do I sign" feel
+2. **🔴 Create polished/branded S5 Excel report** — S5 is showcase sample (100% detection), current report outdated from March 18
+3. **🟡 Nestor questions sent** — 14 questions in TraceQ_Nestor_Questions_April2.docx. Awaiting response. Every answer feeds directly into dictionary.
+4. **🟡 Confidence flagging for overcounts** — flag WRONG items as "LOW CONFIDENCE" in reports so Nestor knows to check
+5. **🟢 Demo + report materials don't depend on accuracy ceiling or Nestor answers — do these NOW**
 
 ### Decisions Log (April 2)
 - Removed half-credit CLOSE scoring. Honest 3-tier: ACCURATE/USEFUL/WRONG/MISS.
 - Engine has hit structural ceiling at ~48%. Further gains need: Nestor input, per-project tuning, or fundamentally different detection approaches.
-- The Nestor questions haven't changed since they were first sent. Stop re-investigating dead ends. Focus on deliverables.
+- Strategic reframe: 6 samples = training data, not the product. Goal = build dictionary rich enough that new client projects are handled with high confidence.
+- All Nestor questions consolidated into one document (14 questions). No more piecemeal back and forth.
 - S5/S6 are client-ready. S1/S2 are serviceable. Use S5 for demo.
 - WRONG items are worse than MISS items — a wrong starting point wastes more of Nestor's time than no starting point.
+- Next priority: demo script rewrite + polished S5 report. These drive revenue and don't need accuracy fixes.
 
 ### Session Activities (April 1)
 1. **Fixed S2 Phase 4 spatial dedup regression** — Phase 4 was incorrectly deduping VCD (167→92, breaking MATCH). Root cause: checked if items split at confirmed gap but didn't verify there was an actual gap for this specific type. Fix: added local_gap_ratio guard (≥0.32). VCD restored to MATCH. Indoor_unit correctly deduped 33→18 (CLOSE). Commit 6762231.
