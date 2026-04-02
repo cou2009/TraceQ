@@ -392,11 +392,19 @@ def get_matched_engine_categories(boq_agg):
 def compare(engine_results, boq_agg):
     """Compare engine results vs BOQ, return match stats."""
     matches = 0
-    mismatches = 0
     not_detected = 0
     false_positives = 0
     verify = 0
     details = []
+
+    # 3-tier scoring (no half-credit):
+    #   ACCURATE: ±5% — Nestor can trust this number as-is
+    #   USEFUL:   ±30% — gives Nestor a starting point, saves him time
+    #   WRONG:    >30% off — wastes Nestor's time, he's better off counting himself
+    #   MISS:     not detected at all — Nestor has to do all the work
+    accurate = 0
+    useful = 0
+    wrong = 0
 
     # Build set of engine categories covered by BOQ (direct + equivalences)
     covered_categories = get_matched_engine_categories(boq_agg)
@@ -406,6 +414,7 @@ def compare(engine_results, boq_agg):
         engine_count, equiv_source = get_engine_count(engine_results, cat)
         boq_qty = boq_data['qty']
         equiv_note = f"  [{equiv_source}]" if equiv_source else ""
+        pct_off = abs(engine_count - boq_qty) / max(boq_qty, 1)
 
         if not boq_data['countable']:
             details.append(f"  {'⚠️ VERIFY':10s} {cat:30s} BOQ={boq_qty:>8.0f} {boq_data['unit']:8s} Engine={engine_count:>6,}  (unit mismatch){equiv_note}")
@@ -415,17 +424,16 @@ def compare(engine_results, boq_agg):
         if engine_count == 0:
             details.append(f"  {'❌ MISS':10s} {cat:30s} BOQ={boq_qty:>8.0f}  Engine=     0  NOT DETECTED")
             not_detected += 1
-        elif abs(engine_count - boq_qty) / max(boq_qty, 1) <= 0.05:
-            details.append(f"  {'✅ MATCH':10s} {cat:30s} BOQ={boq_qty:>8.0f}  Engine={engine_count:>6,}{equiv_note}")
-            matches += 1
-        elif abs(engine_count - boq_qty) / max(boq_qty, 1) <= 0.15:
-            details.append(f"  {'⚠️ CLOSE':10s} {cat:30s} BOQ={boq_qty:>8.0f}  Engine={engine_count:>6,}  ({engine_count/boq_qty:.0%}){equiv_note}")
-            matches += 0.5  # Half credit
-            mismatches += 0.5
+        elif pct_off <= 0.05:
+            details.append(f"  {'✅ ACCURATE':13s} {cat:30s} BOQ={boq_qty:>8.0f}  Engine={engine_count:>6,}  ({pct_off:.0%} off){equiv_note}")
+            accurate += 1
+        elif pct_off <= 0.30:
+            details.append(f"  {'🔶 USEFUL':11s} {cat:30s} BOQ={boq_qty:>8.0f}  Engine={engine_count:>6,}  ({pct_off:.0%} off, {engine_count/boq_qty:.0%} of BOQ){equiv_note}")
+            useful += 1
         else:
             direction = "OVER" if engine_count > boq_qty else "UNDER"
-            details.append(f"  {'❌ ' + direction:10s} {cat:30s} BOQ={boq_qty:>8.0f}  Engine={engine_count:>6,}  ({engine_count/boq_qty:.0%}){equiv_note}")
-            mismatches += 1
+            details.append(f"  {'❌ WRONG':10s} {cat:30s} BOQ={boq_qty:>8.0f}  Engine={engine_count:>6,}  ({direction} {pct_off:.0%}, {engine_count/boq_qty:.0%} of BOQ){equiv_note}")
+            wrong += 1
 
     # Check for false positives (engine found but not in BOQ, with significant count)
     # Skip categories that are covered by BOQ via equivalences
@@ -435,16 +443,24 @@ def compare(engine_results, boq_agg):
             false_positives += 1
 
     total_boq_countable = sum(1 for v in boq_agg.values() if v['countable'])
-    score = matches / max(total_boq_countable, 1) * 100
+
+    # Primary metric: Accurate rate (what Nestor can trust)
+    # Secondary metric: Detection rate (Accurate + Useful = items Nestor doesn't count from scratch)
+    accurate_rate = accurate / max(total_boq_countable, 1) * 100
+    detection_rate = (accurate + useful) / max(total_boq_countable, 1) * 100
+    nestor_saved = accurate + useful  # Items where engine saves Nestor time
 
     return {
-        'matches': matches,
-        'mismatches': mismatches,
+        'accurate': accurate,
+        'useful': useful,
+        'wrong': wrong,
         'not_detected': not_detected,
         'false_positives': false_positives,
         'verify': verify,
         'total_boq_items': total_boq_countable,
-        'score': score,
+        'accurate_rate': accurate_rate,
+        'detection_rate': detection_rate,
+        'nestor_saved': nestor_saved,
         'details': details,
     }
 
@@ -485,38 +501,61 @@ def main():
 
         # Compare
         result = compare(engine_results, boq_agg)
-        print(f"\n  SCORE: {result['score']:.0f}% ({result['matches']:.0f}/{result['total_boq_items']} countable items)")
-        print(f"  Matches={result['matches']:.0f} | Mismatches={result['mismatches']:.0f} | Not Detected={result['not_detected']} | False Positives={result['false_positives']} | Verify={result['verify']}")
+        r = result
+        print(f"\n  ACCURATE: {r['accurate']}/{r['total_boq_items']} items ({r['accurate_rate']:.0f}%) — Nestor can trust these")
+        print(f"  USEFUL:   {r['useful']}/{r['total_boq_items']} items — gives Nestor a starting point (within ±30%)")
+        print(f"  WRONG:    {r['wrong']} items — wastes Nestor's time (>30% off)")
+        print(f"  MISS:     {r['not_detected']} items — Nestor counts from scratch")
+        print(f"  FPs:      {r['false_positives']} false positives | Verify: {r['verify']} unit mismatches")
         print()
         for line in result['details']:
             print(line)
 
         overall_scores[sample_name] = {
-            'score': result['score'],
+            'accurate': r['accurate'],
+            'useful': r['useful'],
+            'wrong': r['wrong'],
+            'not_detected': r['not_detected'],
+            'accurate_rate': r['accurate_rate'],
+            'detection_rate': r['detection_rate'],
             'scan': scan.overall_score,
             'verdict': scan.verdict,
-            'matches': result['matches'],
-            'total': result['total_boq_items'],
-            'false_positives': result['false_positives'],
+            'total': r['total_boq_items'],
+            'false_positives': r['false_positives'],
+            'nestor_saved': r['nestor_saved'],
         }
 
     # Summary table
     print(f"\n{'=' * 90}")
-    print("  OVERALL SCORECARD")
+    print("  OVERALL SCORECARD — HONEST NUMBERS")
     print(f"{'=' * 90}")
-    print(f"  {'Sample':<8} {'Quick Scan':<14} {'Match Score':<16} {'False Pos':<12} {'Verdict'}")
-    print(f"  {'─'*8} {'─'*14} {'─'*16} {'─'*12} {'─'*20}")
+    print(f"  {'Sample':<6} {'Accurate':<12} {'Useful':<10} {'Wrong':<8} {'Miss':<8} {'FPs':<6} {'Nestor Saved'}")
+    print(f"  {'─'*6} {'─'*12} {'─'*10} {'─'*8} {'─'*8} {'─'*6} {'─'*14}")
 
-    total_match = 0
-    total_items = 0
-    for name, data in overall_scores.items():
-        total_match += data['matches']
-        total_items += data['total']
-        fp_str = f"{data['false_positives']} FPs" if data['false_positives'] else "clean"
-        print(f"  {name:<8} {data['scan']:>5.1f}% {data['verdict']:<7} {data['score']:>5.1f}% ({data['matches']:.0f}/{data['total']})   {fp_str:<12} {'✅' if data['score'] >= 50 else '⚠️' if data['score'] >= 25 else '❌'}")
+    tot_accurate = 0
+    tot_useful = 0
+    tot_wrong = 0
+    tot_miss = 0
+    tot_items = 0
+    tot_fps = 0
+    for name, d in overall_scores.items():
+        tot_accurate += d['accurate']
+        tot_useful += d['useful']
+        tot_wrong += d['wrong']
+        tot_miss += d['not_detected']
+        tot_items += d['total']
+        tot_fps += d['false_positives']
+        saved_str = f"{d['nestor_saved']}/{d['total']}"
+        print(f"  {name:<6} {d['accurate']:>3}/{d['total']:<6} {d['useful']:>3}       {d['wrong']:>3}     {d['not_detected']:>3}     {d['false_positives']:>3}   {saved_str} ({d['detection_rate']:.0f}%)")
 
-    avg_score = total_match / max(total_items, 1) * 100
-    print(f"\n  OVERALL: {avg_score:.1f}% ({total_match:.0f}/{total_items} countable items across all samples)")
+    print(f"\n  TOTALS across all samples ({tot_items} countable BOQ items):")
+    print(f"    Accurate (±5%):  {tot_accurate}/{tot_items} = {tot_accurate/max(tot_items,1)*100:.1f}%  — Nestor trusts these")
+    print(f"    Useful (±30%):   {tot_useful}/{tot_items} = {tot_useful/max(tot_items,1)*100:.1f}%  — starting point for Nestor")
+    print(f"    Wrong (>30%):    {tot_wrong}/{tot_items} = {tot_wrong/max(tot_items,1)*100:.1f}%  — wastes Nestor's time")
+    print(f"    Not Detected:    {tot_miss}/{tot_items} = {tot_miss/max(tot_items,1)*100:.1f}%  — Nestor counts from scratch")
+    print(f"    False Positives: {tot_fps} extra items Nestor has to dismiss")
+    print(f"\n    NESTOR TIME SAVED: {tot_accurate + tot_useful}/{tot_items} items ({(tot_accurate+tot_useful)/max(tot_items,1)*100:.1f}%) — items engine handles so Nestor doesn't have to count")
+    print(f"    TRUST RATE:        {tot_accurate}/{tot_items} items ({tot_accurate/max(tot_items,1)*100:.1f}%) — items accurate enough to use as-is")
     print(f"{'=' * 90}")
 
     return overall_scores
