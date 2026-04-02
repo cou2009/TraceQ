@@ -1,6 +1,6 @@
 # TraceQ — Master Project Status
 
-**Last Updated:** April 1, 2026
+**Last Updated:** April 2, 2026
 **Owner:** Nicholas Couvaras, Founder, TechTelligence
 **Contact:** nicholas@ttelligence.com | +971 50 968 9720
 **GitHub:** github.com/cou2009/TraceQ
@@ -771,6 +771,57 @@ All files now in **TraceQ Docs** folder (consolidated March 9).
 6. **Nicholas's confidence level?** Session productive — app verified, repo confirmed complete, thorough investigation documented.
 7. **Files changed:** TraceQ_Project_Status.md only.
 8. **Git status:** One new commit for status doc update.
+
+### Session Activities (April 2)
+1. **Killed half-credit scoring — honest 3-tier harness now in place.** Replaced MATCH/CLOSE/OVER with ACCURATE (±5%), USEFUL (±30%), WRONG (>30%), MISS. No more flattering ourselves.
+2. **Honest numbers revealed:**
+   - **Trust Rate: 41.4%** (24/58 items Nestor can use as-is)
+   - **Detection Rate: 58.6%** (34/58 items where engine saves Nestor time)
+   - **10 WRONG items** actively wasting Nestor's time (overcounts, categorization mismatches)
+   - **14 MISS items** where Nestor counts from scratch
+   - **12 False Positives** Nestor has to dismiss
+3. **Investigated all WRONG items — root causes identified:**
+   - S3 supply_diffuser (107 vs 12): M_HVAC_SAD layer contains ALL supply air devices, BOQ only counts a specific subset. Categorization mismatch, needs domain knowledge.
+   - S3 VCD (94 vs 46): Reclassification SUM double-counts layer entities + text labels. SUM/MAX tradeoff: MAX fixes S3 but breaks S1. Dead end without per-project config.
+   - S4 VCD (169 vs 75), S4 FCU (13 vs 5): Overcounts from ambiguous drawing, blocked on Nestor input.
+   - S2 return_diffuser/grille (17 vs 1): "RETURN AIR DIFFUSER" blocks are actually flow bar units in this project. Block names mean different things across projects.
+   - S1 grille (15 vs 48): Layer detection finds 15 on ground floor only. Missing 33 on other layers/floors.
+   - S2 NRD (4 vs 2), sound_attenuator (2 vs 1): BOQ quantities so small any detection looks disproportionate.
+4. **Explored S3 flow_bar (BOQ=100, currently MISS):** Found "S/RLAD" (Linear Air Diffuser) labels in S3 DXF. Count with S/R multiplier = 132 (32% over), without = 66 (34% under). Neither gives CLOSE/USEFUL. BOQ sits exactly between — interpretation uncertain.
+5. **Key realisation: engine has hit a structural ceiling at ~48%.** Most remaining items fall into 3 buckets: (a) not in DXF at all (~12 items), (b) need Nestor block confirmation (~4 items), (c) ambiguous overcounts where fixing one sample breaks another (~10 items). Pattern matching alone can't solve these.
+
+### Current Scorecard (April 2) — Honest Numbers
+| Sample | Accurate | Useful | Wrong | Miss | FPs | Nestor Saved |
+|--------|----------|--------|-------|------|-----|-------------|
+| S1 | 5/14 | 4 | 1 | 4 | 3 | 9/14 (64%) |
+| S2 | 4/14 | 3 | 4 | 3 | 2 | 7/14 (50%) |
+| S3 | 2/12 | 2 | 2 | 6 | 2 | 4/12 (33%) |
+| S4 | 0/4 | 0 | 3 | 1 | 3 | 0/4 (0%) |
+| S5 | 6/7 | 1 | 0 | 0 | 1 | 7/7 (100%) |
+| S6 | 7/7 | 0 | 0 | 0 | 1 | 7/7 (100%) |
+| **TOTAL** | **24/58 (41%)** | **10** | **10** | **14** | **12** | **34/58 (59%)** |
+
+### Per-Sample Client Readiness (April 2)
+- **S5, S6: CLIENT-READY TODAY.** 100% detection, 86-100% accurate.
+- **S1: SERVICEABLE.** 64% detection. 5 accurate, 4 useful. Nestor reviews ~5 items.
+- **S2: SERVICEABLE.** 50% detection. Most WRONG items have tiny BOQ quantities (1-2).
+- **S3: NEEDS WORK.** 33% detection. Overcounts (VCD 2×, supply_diffuser 9×) + 6 MISS items.
+- **S4: BLOCKED.** 0% — entirely dependent on Nestor confirming *U2164 block = circular_diffuser.
+
+### Pending (carry to next session)
+1. **🔴 Rewrite demo script with agreed positioning** — harder sales energy, pre-tender risk audit angle
+2. **🔴 Create polished/branded S5 Excel report** — outdated numbers from March 18
+3. **🟡 S4 circular_diffuser needs Nestor** — *U2164 (125 count, 3-SUPPLY-DUCT layer). Without this, S4 stays at 0%. ALREADY ASKED — awaiting response.
+4. **🟡 SETFW4 needs Nestor** — 30 count, M_AC_EQUIP layer. ALREADY ASKED — no answer.
+5. **🟡 Confidence flagging for overcounts** — flag WRONG items as "LOW CONFIDENCE" in reports so Nestor knows to check
+6. **🟢 Demo + report materials don't depend on accuracy ceiling — do these in parallel**
+
+### Decisions Log (April 2)
+- Removed half-credit CLOSE scoring. Honest 3-tier: ACCURATE/USEFUL/WRONG/MISS.
+- Engine has hit structural ceiling at ~48%. Further gains need: Nestor input, per-project tuning, or fundamentally different detection approaches.
+- The Nestor questions haven't changed since they were first sent. Stop re-investigating dead ends. Focus on deliverables.
+- S5/S6 are client-ready. S1/S2 are serviceable. Use S5 for demo.
+- WRONG items are worse than MISS items — a wrong starting point wastes more of Nestor's time than no starting point.
 
 ### Session Activities (April 1)
 1. **Fixed S2 Phase 4 spatial dedup regression** — Phase 4 was incorrectly deduping VCD (167→92, breaking MATCH). Root cause: checked if items split at confirmed gap but didn't verify there was an actual gap for this specific type. Fix: added local_gap_ratio guard (≥0.32). VCD restored to MATCH. Indoor_unit correctly deduped 33→18 (CLOSE). Commit 6762231.
