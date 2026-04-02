@@ -791,7 +791,12 @@ All files now in **TraceQ Docs** folder (consolidated March 9).
 5. **Key realisation: engine has hit a structural ceiling at ~48%.** Most remaining items fall into 3 buckets: (a) not in DXF at all (~12 items), (b) need Nestor block confirmation (~4 items), (c) ambiguous overcounts where fixing one sample breaks another (~10 items). Pattern matching alone can't solve these.
 6. **Strategic reframe with Nicholas:** The 6 samples are training data, not the product. Goal is to build a comprehensive dictionary so that when Sample 7 arrives from a real client, the engine recognises most of what's on the drawing. Stop chasing per-sample scores, start building the library.
 7. **Comprehensive Nestor questions document created and sent.** 14 questions across 4 sections (block ID, layer conventions, BOQ gaps, drawing conventions). All questions in one place — no more back and forth. Sent as TraceQ_Nestor_Questions_April2.docx.
-8. **Git commits:** ae99bdb (tightened harness), 29bc47f (status update).
+8. **Git commits:** ae99bdb (tightened harness), 29bc47f (status update), bfb1234 (Nestor questions sent).
+9. **Started demo script rewrite — interactive approach.** Building the script beat by beat with Nicholas rather than writing the whole thing upfront. Agreed structure for the intro:
+   - Beat 1 (10s): Brief intro — "Nicholas from TechTelligence, construction tech, MEP contractors, commercial side." No backstory, no AI mention.
+   - Beat 2 (20s): Pain question — "When was the last time you submitted a tender and the final account came back exactly where you priced it?" Pause. Then normalise: everyone misses things between drawings and BOQ.
+   - Beat 3 (5s): Pivot — "That's what TraceQ catches — before you submit."
+   - Next beat TBD: to be discussed in next session (show report vs explain what TraceQ does).
 
 ### Current Scorecard (April 2) — Honest Numbers
 | Sample | Accurate | Useful | Wrong | Miss | FPs | Nestor Saved |
@@ -826,6 +831,7 @@ All files now in **TraceQ Docs** folder (consolidated March 9).
 - S5/S6 are client-ready. S1/S2 are serviceable. Use S5 for demo.
 - WRONG items are worse than MISS items — a wrong starting point wastes more of Nestor's time than no starting point.
 - Next priority: demo script rewrite + polished S5 report. These drive revenue and don't need accuracy fixes.
+- Demo script being built interactively, beat by beat. Intro agreed: brief who-we-are → pain question → pivot to TraceQ. Continue from Beat 4 next session.
 
 ### Session Activities (April 1)
 1. **Fixed S2 Phase 4 spatial dedup regression** — Phase 4 was incorrectly deduping VCD (167→92, breaking MATCH). Root cause: checked if items split at confirmed gap but didn't verify there was an actual gap for this specific type. Fix: added local_gap_ratio guard (≥0.32). VCD restored to MATCH. Indoor_unit correctly deduped 33→18 (CLOSE). Commit 6762231.
