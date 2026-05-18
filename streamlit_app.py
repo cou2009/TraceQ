@@ -486,228 +486,238 @@ def _xl_val(v):
     return '—' if v is None else v
 
 
-def generate_nestor_feedback(comparisons, missing_from_boq, merged, drawing_name, scan=None):
+def generate_validator_template(comparisons, missing_from_boq, merged, drawing_name, scan=None):
     """
-    Auto-generate a QS feedback sheet merging Step 0 + BOQ results.
-    One tab, three columns: What TraceQ Found | Y/N | Comment.
-    Sections: BOQ Comparison → Unknown Blocks/Layers → Quick Questions.
+    Generate a 4-tab validator XLSX for QS verification.
+    Tab 1: Instructions — what to do, time budget, rules
+    Tab 2: BOQ Comparison — engine output (locked) + Agree? (Yes/No/Partial) + Comments
+    Tab 3: Missing from BOQ — engine findings + Agree? + Comments
+    Tab 4: Validator Discoveries — blank rows for items the QS finds that engine missed
+    Returns bytes of the .xlsx file.
     """
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Feedback"
-    ws.sheet_properties.tabColor = "1A1A2E"
+    from openpyxl.worksheet.datavalidation import DataValidation
 
-    # Styles
-    title_font = Font(name='Arial', bold=True, size=14, color='1A1A2E')
-    sub_font = Font(name='Arial', size=10, color='666666')
-    hdr_font = Font(name='Arial', bold=True, size=11, color='FFFFFF')
-    hdr_fill = PatternFill('solid', fgColor='1A1A2E')
-    input_hdr_fill = PatternFill('solid', fgColor='B8860B')
-    section_font = Font(name='Arial', bold=True, size=11, color='1A1A2E')
-    section_fill = PatternFill('solid', fgColor='E8E8E8')
-    bold_font = Font(name='Arial', bold=True, size=10)
-    normal_font = Font(name='Arial', size=10)
-    match_font = Font(name='Arial', size=10, color='28A745')
-    issue_font = Font(name='Arial', size=10, color='DC3545', bold=True)
-    q_font = Font(name='Arial', size=10, color='0066CC', bold=True)
-    gray_font = Font(name='Arial', size=9, color='999999')
-    input_fill = PatternFill('solid', fgColor='FFF9E6')
+    wb = openpyxl.Workbook()
+
+    # ── Shared styles ──
+    header_font = Font(name='Arial', bold=True, size=11, color='FFFFFF')
+    header_fill = PatternFill('solid', fgColor='2C3E50')
+    section_font = Font(name='Arial', bold=True, size=10, color='8B0000')
+    section_fill = PatternFill('solid', fgColor='F5F0EB')
+    data_font = Font(name='Arial', size=10)
+    yellow_fill = PatternFill('solid', fgColor='FFFDE7')
+    light_gray_fill = PatternFill('solid', fgColor='F8F8F8')
     thin_border = Border(
-        left=Side(style='thin', color='DDDDDD'),
-        right=Side(style='thin', color='DDDDDD'),
-        top=Side(style='thin', color='DDDDDD'),
-        bottom=Side(style='thin', color='DDDDDD'),
+        left=Side(style='thin', color='D0D0D0'),
+        right=Side(style='thin', color='D0D0D0'),
+        top=Side(style='thin', color='D0D0D0'),
+        bottom=Side(style='thin', color='D0D0D0'),
     )
+    wrap_align = Alignment(wrap_text=True, vertical='top')
+    center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
     drawing_short = drawing_name.replace('.dxf', '').replace('.DXF', '').replace('.dwg', '').replace('.DWG', '')
-    # Truncate long multi-file titles
     if len(drawing_short) > 80:
         file_count = drawing_short.count(' + ') + 1
         first_file = drawing_short.split(' + ')[0]
         drawing_short = f"{first_file} + {file_count - 1} more files"
 
-    # Header
-    ws.merge_cells('A1:C1')
-    ws['A1'] = f'TraceQ Feedback — {drawing_short}'
-    ws['A1'].font = title_font
-    ws.merge_cells('A2:C2')
-    ws['A2'] = 'Type Y or N for each item. Only add a comment if you mark N. Should take 5-10 mins.'
-    ws['A2'].font = sub_font
+    def _style_header_row(ws, row, max_col):
+        for col in range(1, max_col + 1):
+            cell = ws.cell(row=row, column=col)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = center_align
+            cell.border = thin_border
 
-    # Column headers
-    for col_letter, header, width, fill in [
-        ('A', 'TraceQ Result', 60, hdr_fill),
-        ('B', 'Y / N', 10, input_hdr_fill),
-        ('C', 'Comment (only if N)', 65, input_hdr_fill),
-    ]:
-        c = ws[f'{col_letter}4']
-        c.value = header
-        c.font = hdr_font
-        c.fill = fill
-        c.alignment = Alignment(horizontal='center', vertical='center')
-        c.border = thin_border
-        ws.column_dimensions[col_letter].width = width
-    ws.row_dimensions[4].height = 28
+    def _style_data_row(ws, row, max_col, is_alt=False, yellow_cols=None):
+        for col in range(1, max_col + 1):
+            cell = ws.cell(row=row, column=col)
+            cell.font = data_font
+            cell.border = thin_border
+            cell.alignment = wrap_align
+            if yellow_cols and col in yellow_cols:
+                cell.fill = yellow_fill
+            elif is_alt:
+                cell.fill = light_gray_fill
 
-    def _add_row(ws, row, text, font, hint=None, row_height=28):
-        """Helper to add a standard feedback row."""
-        ws.cell(row, 1, text).font = font
-        ws.cell(row, 1).border = thin_border
-        ws.cell(row, 1).alignment = Alignment(vertical='center', wrap_text=True)
-        ws.cell(row, 2).fill = input_fill
-        ws.cell(row, 2).font = bold_font
-        ws.cell(row, 2).alignment = Alignment(horizontal='center', vertical='center')
-        ws.cell(row, 2).border = thin_border
-        ws.cell(row, 3).fill = input_fill
-        ws.cell(row, 3).font = normal_font
-        ws.cell(row, 3).alignment = Alignment(vertical='center', wrap_text=True)
-        ws.cell(row, 3).border = thin_border
-        if hint:
-            ws.cell(row, 3, hint).font = gray_font
-        ws.row_dimensions[row].height = row_height
+    def _add_section_label(ws, row, col, text, max_col):
+        cell = ws.cell(row=row, column=col, value=text)
+        cell.font = section_font
+        cell.fill = section_fill
+        for c in range(col, max_col + 1):
+            ws.cell(row=row, column=c).fill = section_fill
+            ws.cell(row=row, column=c).border = thin_border
 
-    def _add_section(ws, row, title):
-        """Helper to add a section header."""
-        ws.cell(row, 1, title).font = section_font
-        for col in range(1, 4):
-            ws.cell(row, col).fill = section_fill
-            ws.cell(row, col).border = thin_border
-        ws.merge_cells(f'A{row}:C{row}')
-        ws.row_dimensions[row].height = 30
+    # ═══ TAB 1: INSTRUCTIONS ═══
+    ws1 = wb.active
+    ws1.title = 'Instructions'
+    ws1.sheet_properties.tabColor = '2C3E50'
+    ws1.column_dimensions['A'].width = 80
 
-    row = 5
+    instr_rows = [
+        ('TraceQ Validator Brief', Font(name='Arial', bold=True, size=14, color='8B0000')),
+        ('', None),
+        ('Your job in one sentence:', Font(name='Arial', bold=True, size=11)),
+        ("Verify the engine's findings line by line and flag anything the engine got wrong or missed.", data_font),
+        ('', None),
+        (f'Drawing: {drawing_short}', Font(name='Arial', bold=True, size=11)),
+        (f'Generated: {datetime.now().strftime("%Y-%m-%d %H:%M")}', data_font),
+        ('', None),
+        ('TIME BUDGET', Font(name='Arial', bold=True, size=11)),
+        ('Target: 2-3 hours total. This is verification work, not a full takeoff.', data_font),
+        ('', None),
+        ('WHAT TO DO', Font(name='Arial', bold=True, size=11)),
+        ('1. BOQ Comparison tab: For each row, check whether the engine count is correct.', data_font),
+        ('   - Yes = engine count is right (or close enough to not matter commercially)', data_font),
+        ('   - No = engine count is wrong (explain why in Comments column)', data_font),
+        ('   - Partial = engine is close but needs adjustment (note the correct count in Comments)', data_font),
+        ('', None),
+        ('2. Items Missing from BOQ tab: Verify each item the engine found on drawings but not in the BOQ.', data_font),
+        ('   - Yes = the item genuinely exists on drawings and is missing from the BOQ', data_font),
+        ('   - No = the engine misidentified something (explain what it actually is in Comments)', data_font),
+        ('', None),
+        ('3. Validator Discoveries tab: Add any items YOU found that the engine missed entirely.', data_font),
+        ('   - If the engine caught everything, leave this sheet blank.', data_font),
+        ('   - These discoveries help us improve the engine for future jobs.', data_font),
+        ('', None),
+        ('WHAT NOT TO DO', Font(name='Arial', bold=True, size=11)),
+        ('- Do not recount from scratch. Spot-check the engine output against the drawings.', data_font),
+        ('- Do not edit the engine output columns (white background). Only fill the yellow cells.', data_font),
+        ('- Do not write client-facing prose. Short technical notes are fine.', data_font),
+    ]
+    for i, (text, font) in enumerate(instr_rows, 1):
+        cell = ws1.cell(row=i, column=1, value=text)
+        if font:
+            cell.font = font
 
-    # ═══ SECTION 1: BOQ COMPARISON ═══
-    _add_section(ws, row, 'BOQ COMPARISON — Is TraceQ\'s count correct?')
-    row += 1
+    # ═══ TAB 2: BOQ COMPARISON ═══
+    ws2 = wb.create_sheet('BOQ Comparison')
+    ws2.sheet_properties.tabColor = '27AE60'
 
-    for comp in comparisons:
+    _add_section_label(ws2, 1, 1, "Engine output (do not edit)", 8)
+    _add_section_label(ws2, 1, 7, "Validator (fill the yellow cells)", 8)
+
+    headers2 = ['#', 'Equipment (from BOQ)', 'Unit', 'BOQ Qty', 'Engine Count',
+                'Variance', 'Agree?', 'Comments']
+    for col, h in enumerate(headers2, 1):
+        ws2.cell(row=2, column=col, value=h)
+    _style_header_row(ws2, 2, 8)
+
+    row = 3
+    for i, comp in enumerate(comparisons, 1):
         equip = comp['Equipment']
-        risk = comp['Risk']
         boq_qty = comp.get('_boq_qty', 0)
-        dwg_qty = comp.get('_drawing_qty')
+        dwg_qty = comp.get('_drawing_qty', 0)
+        unit = comp.get('Unit', 'nos.')
         is_unit_mismatch = comp.get('_is_unit_mismatch', False)
 
-        boq_str = f"{boq_qty:,}" if isinstance(boq_qty, (int, float)) else str(boq_qty)
-        dwg_str = f"{dwg_qty:,}" if isinstance(dwg_qty, (int, float)) and dwg_qty else str(dwg_qty or '—')
-
-        if risk == 'MATCH':
-            text = f"{equip}:  TraceQ = {dwg_str},  BOQ = {boq_str}"
-            font = match_font
-            hint = None
-        elif is_unit_mismatch:
-            unit = comp.get('Unit', '')
-            if dwg_qty and dwg_qty != '—':
-                text = f"{equip}:  TraceQ = {dwg_str},  BOQ = {boq_str} {unit}"
-            else:
-                text = f"{equip}:  not detected,  BOQ = {boq_str} {unit}"
-            font = normal_font
-            hint = f"BOQ in {unit} — can't compare directly" if unit and unit != 'nos.' else None
-        elif risk == 'DISCREPANCY':
-            text = f"{equip}:  TraceQ = {dwg_str},  BOQ = {boq_str}"
-            diff = comp.get('_diff', 0) or 0
-            pct = abs(diff) / max(boq_qty, 1) if boq_qty > 0 else 0
-            font = issue_font if pct > 0.2 else normal_font
-            hint = None
+        # Calculate variance
+        if is_unit_mismatch:
+            variance = 'Unit mismatch'
+        elif dwg_qty in (None, '—', 0, '') or dwg_qty == 0:
+            variance = 'NOT DETECTED'
         else:
-            continue
+            try:
+                diff = float(dwg_qty) - float(boq_qty)
+                pct = diff / max(float(boq_qty), 1) * 100
+                variance = f'{diff:+.0f} ({pct:+.1f}%)'
+            except (ValueError, TypeError):
+                variance = '—'
 
-        # Add review hint if tiers disagree
-        equip_key = equip.lower().replace(' ', '_')
-        merged_data = merged.get(equip_key, {})
-        if merged_data.get('needs_review'):
-            alt = merged_data.get('alternate_counts', {})
-            hint = f"Tiers differ: Layer={alt.get('tier1', 0)}, Block={alt.get('tier2', 0)}, Text={alt.get('tier3', 0)}"
+        ws2.cell(row=row, column=1, value=i)
+        ws2.cell(row=row, column=2, value=equip)
+        ws2.cell(row=row, column=3, value=unit)
+        ws2.cell(row=row, column=4, value=boq_qty)
+        ws2.cell(row=row, column=5, value=dwg_qty if dwg_qty not in (None, '') else 0)
+        ws2.cell(row=row, column=6, value=variance)
+        ws2.cell(row=row, column=7, value='')  # Agree?
+        ws2.cell(row=row, column=8, value='')  # Comments
 
-        _add_row(ws, row, text, font, hint)
+        _style_data_row(ws2, row, 8, is_alt=(i % 2 == 0), yellow_cols={7, 8})
         row += 1
 
-    # Missing from BOQ
+    # Data validation for Agree? column
+    dv2 = DataValidation(type="list", formula1='"Yes,No,Partial"', allow_blank=True)
+    dv2.error = "Please select: Yes, No, or Partial"
+    dv2.errorTitle = "Invalid Entry"
+    ws2.add_data_validation(dv2)
+    if row > 3:
+        dv2.add(f'G3:G{row - 1}')
+
+    widths2 = [5, 30, 8, 10, 12, 18, 12, 40]
+    for col, w in enumerate(widths2, 1):
+        ws2.column_dimensions[get_column_letter(col)].width = w
+
+    # ═══ TAB 3: MISSING FROM BOQ ═══
+    ws3 = wb.create_sheet('Missing from BOQ')
+    ws3.sheet_properties.tabColor = 'E74C3C'
+
+    _add_section_label(ws3, 1, 1, "Engine output", 7)
+    _add_section_label(ws3, 1, 6, "Validator (fill the yellow cells)", 7)
+
+    headers3 = ['#', 'Equipment Description', 'Unit', 'Engine Count',
+                'Detection Source', 'Agree?', 'Comments']
+    for col, h in enumerate(headers3, 1):
+        ws3.cell(row=2, column=col, value=h)
+    _style_header_row(ws3, 2, 7)
+
+    miss_row = 3
+    miss_count = 0
     for m in missing_from_boq:
-        equip = m['Equipment']
-        qty = m['Drawing Qty']
-        qty_str = f"{qty:,}" if isinstance(qty, (int, float)) else str(qty)
-        text = f"{equip}:  TraceQ found {qty_str}  (not in BOQ — should it be?)"
-        _add_row(ws, row, text, normal_font)
-        row += 1
+        miss_count += 1
+        qty = m.get('Drawing Qty', 0)
+        detection = m.get('Detection', '?')
 
-    # ═══ SECTION 2: UNKNOWN BLOCKS & LAYERS (from Step 0) ═══
-    has_unknowns = False
-    if scan:
-        unrec_blocks = getattr(scan, 'unrecognised_blocks', []) or []
-        unrec_layers = getattr(scan, 'unrecognised_layers', []) or []
-        rec_blocks = getattr(scan, 'recognised_blocks', []) or []
+        ws3.cell(row=miss_row, column=1, value=miss_count)
+        ws3.cell(row=miss_row, column=2, value=m['Equipment'])
+        ws3.cell(row=miss_row, column=3, value='nos.')
+        ws3.cell(row=miss_row, column=4, value=qty)
+        ws3.cell(row=miss_row, column=5, value=detection)
+        ws3.cell(row=miss_row, column=6, value='')  # Agree?
+        ws3.cell(row=miss_row, column=7, value='')  # Comments
 
-        # Filter: only show unknown blocks with significant count (>5 occurrences)
-        sig_blocks = [ub for ub in unrec_blocks if ub.get('count', 0) > 5]
-        # Filter: only show unknown layers that look HVAC-related
-        hvac_hints = ['HVAC', 'AC', 'DUCT', 'DIFF', 'VCD', 'FCU', 'FAN', 'DAMPER', 'PIPE', 'REF', 'THERM', 'VRF', 'VRV', 'AHU']
-        sig_layers = [ul for ul in unrec_layers if any(h in ul.upper() for h in hvac_hints)]
+        _style_data_row(ws3, miss_row, 7, is_alt=(miss_count % 2 == 0), yellow_cols={6, 7})
+        miss_row += 1
 
-        if sig_blocks or sig_layers:
-            has_unknowns = True
-            row += 1
-            _add_section(ws, row, 'UNKNOWN ITEMS — Is this equipment? (Y = yes, N = not equipment)')
-            row += 1
+    if miss_count == 0:
+        ws3.cell(row=3, column=1, value='No additional items found by engine beyond BOQ categories.')
+        ws3.cell(row=3, column=1).font = Font(name='Arial', italic=True, size=10, color='888888')
 
-            for ub in sig_blocks:
-                block_name = ub.get('block', ub) if isinstance(ub, dict) else str(ub)
-                count = ub.get('count', '?') if isinstance(ub, dict) else '?'
-                text = f"Block \"{block_name}\" ({count} occurrences) — is this equipment?"
-                _add_row(ws, row, text, normal_font, hint="If Y, what equipment type?")
-                row += 1
+    # Data validation for Agree? column
+    dv3 = DataValidation(type="list", formula1='"Yes,No,Partial"', allow_blank=True)
+    ws3.add_data_validation(dv3)
+    if miss_count > 0:
+        dv3.add(f'F3:F{miss_row - 1}')
 
-            for ul in sig_layers:
-                layer_name = ul if isinstance(ul, str) else str(ul)
-                text = f"Layer \"{layer_name}\" — is this an equipment layer?"
-                _add_row(ws, row, text, normal_font, hint="If Y, what equipment type?")
-                row += 1
+    widths3 = [5, 28, 8, 12, 25, 12, 40]
+    for col, w in enumerate(widths3, 1):
+        ws3.column_dimensions[get_column_letter(col)].width = w
 
-    # ═══ SECTION 3: QUICK QUESTIONS (only for genuinely ambiguous items) ═══
-    auto_questions = []
-    for comp in comparisons:
-        risk = comp['Risk']
-        equip = comp['Equipment']
-        equip_key = comp.get('_equipment_type', equip.lower().replace(' ', '_'))
-        merged_data = merged.get(equip_key, {})
+    # ═══ TAB 4: VALIDATOR DISCOVERIES ═══
+    ws4 = wb.create_sheet('Validator Discoveries')
+    ws4.sheet_properties.tabColor = '8E44AD'
 
-        if merged_data.get('needs_review'):
-            alt = merged_data.get('alternate_counts', {})
-            auto_questions.append(
-                f"{equip}: Layer={alt.get('tier1', 0)}, Block={alt.get('tier2', 0)}, "
-                f"Text={alt.get('tier3', 0)} — which count is correct?"
-            )
-        elif risk == 'DISCREPANCY' and not comp.get('_is_unit_mismatch', False):
-            diff = comp.get('_diff', 0) or 0
-            boq_qty = comp.get('_boq_qty', 0)
-            pct = abs(diff) / max(boq_qty, 1) if boq_qty > 0 else 0
-            if pct > 0.2:
-                dwg = comp.get('_drawing_qty', '?')
-                boq = comp.get('_boq_qty', '?')
-                auto_questions.append(
-                    f"{equip}: TraceQ found {dwg} but BOQ has {boq} — why the gap?"
-                )
+    ws4.cell(row=1, column=1, value="Items YOU found on the drawings that the engine MISSED entirely")
+    ws4.cell(row=1, column=1).font = Font(name='Arial', bold=True, size=11, color='8B0000')
+    ws4.cell(row=2, column=1, value="If everything is already covered, leave this sheet blank. We use this to improve the engine.")
+    ws4.cell(row=2, column=1).font = Font(name='Arial', italic=True, size=10, color='666666')
 
-    if auto_questions:
-        row += 1
-        _add_section(ws, row, 'QUESTIONS (short answer needed)')
-        row += 1
+    headers4 = ['#', 'Equipment Description', 'Unit', 'Your Count',
+                'Where in drawing (floor/area)', 'Why you think the engine missed it']
+    for col, h in enumerate(headers4, 1):
+        ws4.cell(row=3, column=col, value=h)
+    _style_header_row(ws4, 3, 6)
 
-        for q in auto_questions:
-            ws.cell(row, 1, q).font = q_font
-            ws.cell(row, 1).border = thin_border
-            ws.cell(row, 1).alignment = Alignment(vertical='center', wrap_text=True)
-            ws.merge_cells(f'B{row}:C{row}')
-            ws.cell(row, 2).fill = input_fill
-            ws.cell(row, 2).font = normal_font
-            ws.cell(row, 2).alignment = Alignment(vertical='center', wrap_text=True)
-            ws.cell(row, 2).border = thin_border
-            ws.cell(row, 3).border = thin_border
-            ws.row_dimensions[row].height = 40
-            row += 1
+    for r in range(4, 19):
+        ws4.cell(row=r, column=1, value=r - 3)
+        _style_data_row(ws4, r, 6, yellow_cols={2, 3, 4, 5, 6})
 
-    ws.freeze_panes = 'A5'
+    widths4 = [5, 28, 8, 12, 30, 40]
+    for col, w in enumerate(widths4, 1):
+        ws4.column_dimensions[get_column_letter(col)].width = w
 
+    # Save to bytes
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
@@ -1243,10 +1253,629 @@ st.markdown("""
 st.markdown('<p class="main-header">🔍 TraceQ</p>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">BOQ Risk Review Engine — by TechTelligence</p>', unsafe_allow_html=True)
 
-# ─── Sidebar ──────────────────────────────────────────────────────────────────
+# ─── Sidebar — Page Navigation ───────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### Upload Files")
-    st.markdown("Upload your HVAC drawing(s) to analyse.")
+    st.markdown("### Navigation")
+    page = st.radio(
+        "Select page:",
+        ["Engine Analysis", "Upload Validator Response"],
+        label_visibility="collapsed",
+    )
+    st.markdown("---")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# VALIDATOR RESPONSE PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+
+def parse_validator_xlsx(file_bytes, filename):
+    """Parse a validator submission XLSX and return structured data from 3 tabs."""
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+    sheet_names_upper = {s.upper(): s for s in wb.sheetnames}
+
+    result = {
+        'filename': filename,
+        'boq_comparison': [],
+        'missing_from_boq': [],
+        'discoveries': [],
+    }
+
+    # ── BOQ Comparison tab ──
+    boq_tab = None
+    for key in ['BOQ COMPARISON', 'BOQ_COMPARISON']:
+        if key in sheet_names_upper:
+            boq_tab = wb[sheet_names_upper[key]]
+            break
+    if boq_tab is None:
+        for sn in wb.sheetnames:
+            if 'BOQ' in sn.upper() and 'COMPARISON' in sn.upper():
+                boq_tab = wb[sn]
+                break
+    if boq_tab is None and len(wb.sheetnames) >= 2:
+        boq_tab = wb[wb.sheetnames[1]]  # fallback: second sheet
+
+    if boq_tab:
+        # Find header row (look for "Equipment" or "#" in first 5 rows)
+        header_row = 2  # default
+        for r in range(1, 6):
+            for c in range(1, 10):
+                val = boq_tab.cell(row=r, column=c).value
+                if val and 'EQUIPMENT' in str(val).upper():
+                    header_row = r
+                    break
+
+        # Read data rows starting after header
+        for r in range(header_row + 1, boq_tab.max_row + 1):
+            row_num = boq_tab.cell(row=r, column=1).value
+            if row_num is None:
+                continue
+            try:
+                int(row_num)
+            except (ValueError, TypeError):
+                continue
+
+            equipment = str(boq_tab.cell(row=r, column=2).value or '').strip()
+            if not equipment:
+                continue
+
+            unit = str(boq_tab.cell(row=r, column=3).value or '').strip()
+            boq_qty = boq_tab.cell(row=r, column=4).value
+            engine_count = boq_tab.cell(row=r, column=5).value
+            variance = boq_tab.cell(row=r, column=6).value
+            agree = str(boq_tab.cell(row=r, column=7).value or '').strip()
+            comments = str(boq_tab.cell(row=r, column=8).value or '').strip()
+
+            # Try to get numeric values
+            try:
+                boq_qty = float(boq_qty) if boq_qty is not None else None
+            except (ValueError, TypeError):
+                pass
+            try:
+                engine_count = float(engine_count) if engine_count is not None else None
+            except (ValueError, TypeError):
+                pass
+
+            result['boq_comparison'].append({
+                'equipment': equipment,
+                'unit': unit,
+                'boq_qty': boq_qty,
+                'engine_count': engine_count,
+                'variance': variance,
+                'agree': agree.upper() if agree else '',
+                'comments': comments,
+            })
+
+    # ── Missing from BOQ tab ──
+    missing_tab = None
+    for sn in wb.sheetnames:
+        if 'MISSING' in sn.upper():
+            missing_tab = wb[sn]
+            break
+    if missing_tab is None and len(wb.sheetnames) >= 3:
+        missing_tab = wb[wb.sheetnames[2]]
+
+    if missing_tab:
+        header_row = 2
+        for r in range(1, 6):
+            for c in range(1, 10):
+                val = missing_tab.cell(row=r, column=c).value
+                if val and 'EQUIPMENT' in str(val).upper():
+                    header_row = r
+                    break
+
+        for r in range(header_row + 1, missing_tab.max_row + 1):
+            row_num = missing_tab.cell(row=r, column=1).value
+            if row_num is None:
+                continue
+            try:
+                int(row_num)
+            except (ValueError, TypeError):
+                continue
+
+            equipment = str(missing_tab.cell(row=r, column=2).value or '').strip()
+            if not equipment:
+                continue
+
+            unit = str(missing_tab.cell(row=r, column=3).value or '').strip()
+            engine_count = missing_tab.cell(row=r, column=4).value
+            detection_source = str(missing_tab.cell(row=r, column=5).value or '').strip()
+            agree = str(missing_tab.cell(row=r, column=6).value or '').strip()
+            comments = str(missing_tab.cell(row=r, column=7).value or '').strip()
+
+            result['missing_from_boq'].append({
+                'equipment': equipment,
+                'unit': unit,
+                'engine_count': engine_count,
+                'detection_source': detection_source,
+                'agree': agree.upper() if agree else '',
+                'comments': comments,
+            })
+
+    # ── Validator Discoveries tab ──
+    disc_tab = None
+    for sn in wb.sheetnames:
+        if 'DISCOVER' in sn.upper():
+            disc_tab = wb[sn]
+            break
+    if disc_tab is None and len(wb.sheetnames) >= 4:
+        disc_tab = wb[wb.sheetnames[3]]
+
+    if disc_tab:
+        header_row = 3  # Discoveries typically has instructions in rows 1-2
+        for r in range(1, 6):
+            for c in range(1, 8):
+                val = disc_tab.cell(row=r, column=c).value
+                if val and 'EQUIPMENT' in str(val).upper():
+                    header_row = r
+                    break
+
+        for r in range(header_row + 1, disc_tab.max_row + 1):
+            row_num = disc_tab.cell(row=r, column=1).value
+            if row_num is None:
+                continue
+            equipment = str(disc_tab.cell(row=r, column=2).value or '').strip()
+            if not equipment:
+                continue
+
+            unit = str(disc_tab.cell(row=r, column=3).value or '').strip()
+            count = disc_tab.cell(row=r, column=4).value
+            location = str(disc_tab.cell(row=r, column=5).value or '').strip()
+            reason = str(disc_tab.cell(row=r, column=6).value or '').strip()
+
+            result['discoveries'].append({
+                'equipment': equipment,
+                'unit': unit,
+                'count': count,
+                'location': location,
+                'reason_missed': reason,
+            })
+
+    wb.close()
+    return result
+
+
+def compare_validators(v1, v2):
+    """Compare two validator submissions. Returns agreements, divergences, engine error candidates."""
+    agreements = []
+    divergences = []
+    engine_errors = []
+
+    # ── Compare BOQ Comparison verdicts ──
+    # Build lookup by equipment name (normalised)
+    v1_boq = {item['equipment'].upper(): item for item in v1['boq_comparison']}
+    v2_boq = {item['equipment'].upper(): item for item in v2['boq_comparison']}
+
+    all_equipment = set(v1_boq.keys()) | set(v2_boq.keys())
+    for equip in sorted(all_equipment):
+        item1 = v1_boq.get(equip, {})
+        item2 = v2_boq.get(equip, {})
+
+        agree1 = item1.get('agree', '').upper()
+        agree2 = item2.get('agree', '').upper()
+
+        # Normalise Yes/No
+        def _norm(val):
+            if not val:
+                return 'MISSING'
+            if val in ('YES', 'Y'):
+                return 'YES'
+            if val in ('NO', 'N'):
+                return 'NO'
+            if val.startswith('PARTIAL'):
+                return 'PARTIAL'
+            return val
+
+        n1, n2 = _norm(agree1), _norm(agree2)
+
+        row = {
+            'equipment': item1.get('equipment', item2.get('equipment', equip)),
+            'boq_qty': item1.get('boq_qty') or item2.get('boq_qty'),
+            'engine_count': item1.get('engine_count') or item2.get('engine_count'),
+            'v1_agree': n1,
+            'v2_agree': n2,
+            'v1_comments': item1.get('comments', ''),
+            'v2_comments': item2.get('comments', ''),
+        }
+
+        if n1 == n2:
+            agreements.append(row)
+            # Both say NO = engine error candidate
+            if n1 == 'NO':
+                engine_errors.append({
+                    'equipment': row['equipment'],
+                    'issue': 'Both validators disagree with engine count',
+                    'v1_comments': row['v1_comments'],
+                    'v2_comments': row['v2_comments'],
+                    'boq_qty': row['boq_qty'],
+                    'engine_count': row['engine_count'],
+                })
+        else:
+            divergences.append(row)
+
+    # ── Compare Missing from BOQ verdicts ──
+    v1_miss = {item['equipment'].upper(): item for item in v1['missing_from_boq']}
+    v2_miss = {item['equipment'].upper(): item for item in v2['missing_from_boq']}
+
+    all_missing = set(v1_miss.keys()) | set(v2_miss.keys())
+    for equip in sorted(all_missing):
+        item1 = v1_miss.get(equip, {})
+        item2 = v2_miss.get(equip, {})
+
+        agree1 = item1.get('agree', '').upper()
+        agree2 = item2.get('agree', '').upper()
+
+        def _norm(val):
+            if not val:
+                return 'MISSING'
+            if val in ('YES', 'Y'):
+                return 'YES'
+            if val in ('NO', 'N'):
+                return 'NO'
+            return val
+
+        n1, n2 = _norm(agree1), _norm(agree2)
+
+        row = {
+            'equipment': item1.get('equipment', item2.get('equipment', equip)),
+            'engine_count': item1.get('engine_count') or item2.get('engine_count'),
+            'v1_agree': n1,
+            'v2_agree': n2,
+            'v1_comments': item1.get('comments', ''),
+            'v2_comments': item2.get('comments', ''),
+            'section': 'Missing from BOQ',
+        }
+
+        if n1 == n2:
+            agreements.append(row)
+            if n1 == 'NO':
+                engine_errors.append({
+                    'equipment': row['equipment'],
+                    'issue': 'Both validators say item is NOT missing from BOQ (false positive)',
+                    'v1_comments': row['v1_comments'],
+                    'v2_comments': row['v2_comments'],
+                    'engine_count': row['engine_count'],
+                })
+        else:
+            divergences.append(row)
+
+    # ── Collect discoveries from both ──
+    all_discoveries = []
+    for d in v1.get('discoveries', []):
+        d['source_validator'] = v1['filename']
+        all_discoveries.append(d)
+    for d in v2.get('discoveries', []):
+        d['source_validator'] = v2['filename']
+        all_discoveries.append(d)
+
+    return {
+        'agreements': agreements,
+        'divergences': divergences,
+        'engine_errors': engine_errors,
+        'discoveries': all_discoveries,
+    }
+
+
+def write_to_l1_tracker(tracker_bytes, job_id, validator_data_list, comparison=None):
+    """
+    Write validator data to L1 Feedback Tracker XLSX.
+    Populates QS Feedback tab and Engine Improvement Log tab.
+    Returns updated workbook bytes.
+    """
+    wb = openpyxl.load_workbook(io.BytesIO(tracker_bytes))
+
+    # ── QS Feedback tab ──
+    qs_tab = None
+    for sn in wb.sheetnames:
+        if 'QS' in sn.upper() and 'FEEDBACK' in sn.upper():
+            qs_tab = wb[sn]
+            break
+
+    if qs_tab:
+        # Find next empty row (headers at row 4, data starts row 5)
+        next_row = 5
+        while qs_tab.cell(row=next_row, column=1).value is not None:
+            next_row += 1
+
+        item_no = 1
+        for vdata in validator_data_list:
+            validator_name = vdata['filename'].replace('.xlsx', '').replace('.XLSX', '')
+
+            # Write BOQ Comparison items
+            for item in vdata['boq_comparison']:
+                qs_tab.cell(row=next_row, column=1, value=job_id)  # Job ID
+                qs_tab.cell(row=next_row, column=2, value=item_no)  # Item No.
+                qs_tab.cell(row=next_row, column=3, value=item['equipment'])  # Equipment Type
+                qs_tab.cell(row=next_row, column=4, value=item.get('engine_count'))  # Engine Count
+                qs_tab.cell(row=next_row, column=5, value=item.get('boq_qty'))  # BOQ Count
+                qs_tab.cell(row=next_row, column=6, value=item.get('agree', ''))  # Engine Status mapped to QS Agrees?
+                qs_tab.cell(row=next_row, column=7, value=item.get('agree', ''))  # QS Agrees?
+                qs_tab.cell(row=next_row, column=9, value=item.get('comments', ''))  # QS Reasoning
+                # Is This a False Positive? — YES if validator says NO
+                is_fp = 'YES' if item.get('agree', '').upper() == 'NO' else 'NO'
+                qs_tab.cell(row=next_row, column=10, value=is_fp)
+                qs_tab.cell(row=next_row, column=14, value=validator_name)  # Loop 2 Note (validator ID)
+                next_row += 1
+                item_no += 1
+
+            # Write Missing from BOQ items
+            for item in vdata['missing_from_boq']:
+                qs_tab.cell(row=next_row, column=1, value=job_id)
+                qs_tab.cell(row=next_row, column=2, value=item_no)
+                qs_tab.cell(row=next_row, column=3, value=item['equipment'])
+                qs_tab.cell(row=next_row, column=4, value=item.get('engine_count'))
+                qs_tab.cell(row=next_row, column=6, value='MISSING')
+                qs_tab.cell(row=next_row, column=7, value=item.get('agree', ''))
+                qs_tab.cell(row=next_row, column=9, value=item.get('comments', ''))
+                is_fp = 'YES' if item.get('agree', '').upper() == 'NO' else 'NO'
+                qs_tab.cell(row=next_row, column=10, value=is_fp)
+                qs_tab.cell(row=next_row, column=14, value=validator_name)
+                next_row += 1
+                item_no += 1
+
+    # ── Engine Improvement Log tab ──
+    eng_tab = None
+    for sn in wb.sheetnames:
+        if 'ENGINE' in sn.upper() and 'IMPROVEMENT' in sn.upper():
+            eng_tab = wb[sn]
+            break
+    if eng_tab is None:
+        for sn in wb.sheetnames:
+            if 'ENGINE' in sn.upper():
+                eng_tab = wb[sn]
+                break
+
+    if eng_tab and comparison and comparison.get('engine_errors'):
+        next_row = 5
+        while eng_tab.cell(row=next_row, column=1).value is not None:
+            next_row += 1
+
+        fix_id = 1
+        for err in comparison['engine_errors']:
+            eng_tab.cell(row=next_row, column=1, value=f"FIX-{job_id}-{fix_id:03d}")  # Fix ID
+            eng_tab.cell(row=next_row, column=2, value=datetime.now().strftime('%Y-%m-%d'))  # Date Logged
+            eng_tab.cell(row=next_row, column=3, value=err['equipment'])  # Equipment Type
+            eng_tab.cell(row=next_row, column=4, value=err['issue'])  # Issue Description
+            eng_tab.cell(row=next_row, column=6, value=job_id)  # Source Job IDs
+            eng_tab.cell(row=next_row, column=7, value='OPEN')  # Fix Status
+            next_row += 1
+            fix_id += 1
+
+    # Save to bytes
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    wb.close()
+    return output.getvalue()
+
+
+def render_validator_page():
+    """Render the Upload Validator Response page."""
+
+    with st.sidebar:
+        st.markdown("### Validator Response")
+        st.markdown("Upload 1 or 2 completed validator XLSX files to review and log feedback.")
+
+        validator_files = st.file_uploader(
+            "Validator XLSX Submission(s)",
+            type=["xlsx"],
+            accept_multiple_files=True,
+            help="Upload the completed XLSX file(s) returned by your validators.",
+            key="validator_upload",
+        )
+
+        job_id = st.text_input("Job ID", value="TQ-TRAIN-S5", help="Job identifier for L1 Tracker logging.")
+
+        tracker_file = st.file_uploader(
+            "L1 Feedback Tracker (optional)",
+            type=["xlsx"],
+            help="Upload your L1 Feedback Tracker to auto-populate it with validator data.",
+            key="tracker_upload",
+        )
+
+    if not validator_files:
+        st.markdown("---")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown("#### 1. Upload Submissions")
+            st.markdown("Drag in 1 or 2 validator XLSX files from the sidebar.")
+        with col2:
+            st.markdown("#### 2. Review Verdicts")
+            st.markdown("See agreements, divergences, and engine error candidates at a glance.")
+        with col3:
+            st.markdown("#### 3. Log to L1 Tracker")
+            st.markdown("Optionally upload your L1 Feedback Tracker to auto-populate it.")
+        st.markdown("---")
+        st.info("Upload validator submission(s) in the sidebar to get started.")
+        return
+
+    if len(validator_files) > 2:
+        st.error("Please upload a maximum of 2 validator files.")
+        return
+
+    # ── Parse uploads ──
+    parsed = []
+    for vf in validator_files:
+        with st.spinner(f"Parsing {vf.name}..."):
+            try:
+                data = parse_validator_xlsx(vf.read(), vf.name)
+                parsed.append(data)
+                st.success(f"Parsed **{vf.name}**: {len(data['boq_comparison'])} BOQ items, "
+                          f"{len(data['missing_from_boq'])} missing items, "
+                          f"{len(data['discoveries'])} discoveries")
+            except Exception as e:
+                st.error(f"Error parsing {vf.name}: {str(e)}")
+                return
+
+    st.markdown("---")
+
+    # ── Single validator view ──
+    if len(parsed) == 1:
+        v = parsed[0]
+        st.markdown("### Validator Submission Summary")
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("BOQ Comparison Items", len(v['boq_comparison']))
+        with col2:
+            st.metric("Missing from BOQ Items", len(v['missing_from_boq']))
+        with col3:
+            st.metric("Validator Discoveries", len(v['discoveries']))
+
+        # Agree/Disagree breakdown
+        agrees = sum(1 for i in v['boq_comparison'] if i['agree'] in ('YES', 'Y'))
+        disagrees = sum(1 for i in v['boq_comparison'] if i['agree'] in ('NO', 'N'))
+        st.markdown(f"**BOQ Comparison:** {agrees} agreed, {disagrees} disagreed out of {len(v['boq_comparison'])} items")
+
+        if v['boq_comparison']:
+            st.markdown("#### BOQ Comparison Verdicts")
+            st.dataframe(
+                [{
+                    'Equipment': i['equipment'],
+                    'BOQ Qty': i['boq_qty'],
+                    'Engine Count': i['engine_count'],
+                    'Agree?': i['agree'],
+                    'Comments': i['comments'],
+                } for i in v['boq_comparison']],
+                use_container_width=True, hide_index=True,
+            )
+
+        if v['missing_from_boq']:
+            st.markdown("#### Missing from BOQ Verdicts")
+            st.dataframe(
+                [{
+                    'Equipment': i['equipment'],
+                    'Engine Count': i['engine_count'],
+                    'Agree?': i['agree'],
+                    'Comments': i['comments'],
+                } for i in v['missing_from_boq']],
+                use_container_width=True, hide_index=True,
+            )
+
+        if v['discoveries']:
+            st.markdown("#### Validator Discoveries")
+            st.dataframe(
+                [{
+                    'Equipment': i['equipment'],
+                    'Unit': i['unit'],
+                    'Count': i['count'],
+                    'Location': i['location'],
+                    'Why Engine Missed': i['reason_missed'],
+                } for i in v['discoveries']],
+                use_container_width=True, hide_index=True,
+            )
+
+    # ── Dual validator comparison ──
+    else:
+        st.markdown("### Dual Validator Comparison")
+        st.markdown(f"**Validator 1:** {parsed[0]['filename']}  |  **Validator 2:** {parsed[1]['filename']}")
+
+        comparison = compare_validators(parsed[0], parsed[1])
+
+        # Summary metrics
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Agreements", len(comparison['agreements']))
+        with col2:
+            st.metric("Divergences", len(comparison['divergences']),
+                      delta=f"{len(comparison['divergences'])} need review" if comparison['divergences'] else None,
+                      delta_color="inverse")
+        with col3:
+            st.metric("Engine Error Candidates", len(comparison['engine_errors']),
+                      delta_color="inverse")
+        with col4:
+            st.metric("Discoveries", len(comparison['discoveries']))
+
+        # Divergences first (most actionable)
+        if comparison['divergences']:
+            st.markdown("#### Divergences (Validators Disagree)")
+            st.markdown("_These items need follow-up. Conservative rule: if unsure, INCLUDE the item._")
+            st.dataframe(
+                [{
+                    'Equipment': d['equipment'],
+                    'V1 Verdict': d['v1_agree'],
+                    'V2 Verdict': d['v2_agree'],
+                    'V1 Comments': d['v1_comments'],
+                    'V2 Comments': d['v2_comments'],
+                } for d in comparison['divergences']],
+                use_container_width=True, hide_index=True,
+            )
+
+        if comparison['engine_errors']:
+            st.markdown("#### Engine Error Candidates (Both Say NO)")
+            st.markdown("_Both validators flagged these as wrong. Feed back to engine._")
+            st.dataframe(
+                [{
+                    'Equipment': e['equipment'],
+                    'Issue': e['issue'],
+                    'V1 Comments': e['v1_comments'],
+                    'V2 Comments': e['v2_comments'],
+                } for e in comparison['engine_errors']],
+                use_container_width=True, hide_index=True,
+            )
+
+        if comparison['agreements']:
+            with st.expander(f"Agreements ({len(comparison['agreements'])} items)", expanded=False):
+                st.dataframe(
+                    [{
+                        'Equipment': a['equipment'],
+                        'Verdict': a['v1_agree'],
+                        'V1 Comments': a['v1_comments'],
+                        'V2 Comments': a['v2_comments'],
+                    } for a in comparison['agreements']],
+                    use_container_width=True, hide_index=True,
+                )
+
+        if comparison['discoveries']:
+            st.markdown("#### All Validator Discoveries")
+            st.dataframe(
+                [{
+                    'Equipment': d['equipment'],
+                    'Unit': d['unit'],
+                    'Count': d['count'],
+                    'Location': d['location'],
+                    'Why Missed': d['reason_missed'],
+                    'Source': d['source_validator'],
+                } for d in comparison['discoveries']],
+                use_container_width=True, hide_index=True,
+            )
+
+    # ── L1 Tracker population ──
+    st.markdown("---")
+    st.markdown("### L1 Feedback Tracker")
+
+    if tracker_file:
+        tracker_bytes = tracker_file.read()
+        comparison_data = compare_validators(parsed[0], parsed[1]) if len(parsed) == 2 else None
+
+        if st.button("Populate L1 Tracker", type="primary"):
+            with st.spinner("Writing to L1 Feedback Tracker..."):
+                try:
+                    updated = write_to_l1_tracker(tracker_bytes, job_id, parsed, comparison_data)
+                    st.success("L1 Feedback Tracker populated successfully!")
+                    st.download_button(
+                        label="Download Updated L1 Tracker",
+                        data=updated,
+                        file_name=f"TraceQ_L1_Feedback_Tracker_{job_id}_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+                except Exception as e:
+                    st.error(f"Error writing to tracker: {str(e)}")
+    else:
+        st.info("Upload your L1 Feedback Tracker in the sidebar to auto-populate it with validator data.")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE ROUTER
+# ══════════════════════════════════════════════════════════════════════════════
+
+if page == "Upload Validator Response":
+    render_validator_page()
+
+else:
+    # ─── ENGINE ANALYSIS PAGE (original) ─────────────────────────────────────
+    with st.sidebar:
+        st.markdown("### Upload Files")
+        st.markdown("Upload your HVAC drawing(s) to analyse.")
 
     drawing_files = st.file_uploader(
         "📐 Drawing File(s) (DXF or DWG)",
@@ -1289,591 +1918,591 @@ with st.sidebar:
     st.markdown("*v1.3 — March 2026*")
 
 
-# ─── Main Content ─────────────────────────────────────────────────────────────
+    # ─── Main Content ─────────────────────────────────────────────────────────────
 
-if not drawing_files:
-    # Landing state — no file uploaded yet
-    st.markdown("---")
+    if not drawing_files:
+        # Landing state — no file uploaded yet
+        st.markdown("---")
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown("#### 📐 Upload Drawing(s)")
-        st.markdown("Upload your HVAC layout drawing(s) (DXF or DWG) using the sidebar.")
-    with col2:
-        st.markdown("#### 🔍 Automatic Analysis")
-        st.markdown("TraceQ scans every layer, block, and text label to count equipment.")
-    with col3:
-        st.markdown("#### 📊 Get Your Report")
-        st.markdown("See discrepancies, missing items, and cost exposure at a glance.")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown("#### 📐 Upload Drawing(s)")
+            st.markdown("Upload your HVAC layout drawing(s) (DXF or DWG) using the sidebar.")
+        with col2:
+            st.markdown("#### 🔍 Automatic Analysis")
+            st.markdown("TraceQ scans every layer, block, and text label to count equipment.")
+        with col3:
+            st.markdown("#### 📊 Get Your Report")
+            st.markdown("See discrepancies, missing items, and cost exposure at a glance.")
 
-    st.markdown("---")
-    st.info("👈 Upload one or more DXF/DWG files in the sidebar to get started.")
+        st.markdown("---")
+        st.info("👈 Upload one or more DXF/DWG files in the sidebar to get started.")
 
-else:
-    # ─── Prepare all uploaded drawing files ───────────────────────────────────
-    tmp_paths = []  # List of (filename, tmp_path) tuples
-    for drawing_file in drawing_files:
-        file_ext = os.path.splitext(drawing_file.name)[1].lower() or '.dxf'
-        with tempfile.NamedTemporaryFile(suffix=file_ext, delete=False) as tmp:
-            tmp.write(drawing_file.read())
-            tmp_path = tmp.name
+    else:
+        # ─── Prepare all uploaded drawing files ───────────────────────────────────
+        tmp_paths = []  # List of (filename, tmp_path) tuples
+        for drawing_file in drawing_files:
+            file_ext = os.path.splitext(drawing_file.name)[1].lower() or '.dxf'
+            with tempfile.NamedTemporaryFile(suffix=file_ext, delete=False) as tmp:
+                tmp.write(drawing_file.read())
+                tmp_path = tmp.name
 
-        # DWG → DXF Auto-Conversion
-        if file_ext == '.dwg':
-            with st.spinner(f"Converting {drawing_file.name} DWG to DXF..."):
-                try:
-                    dxf_path = FileConverter.convert_dwg_to_dxf(tmp_path)
-                    tmp_path = dxf_path
-                    st.success(f"✅ Converted **{drawing_file.name}** to DXF successfully.")
-                except RuntimeError as e:
-                    st.error(
-                        f"⚠️ Could not convert {drawing_file.name} automatically.\n\n"
-                        f"**What to do:** Open the DWG in AutoCAD or BricsCAD → File → Save As → DXF, "
-                        f"then upload the DXF version.\n\n"
-                        f"_Technical detail: {str(e)}_"
-                    )
-                    continue  # Skip this file, process the rest
+            # DWG → DXF Auto-Conversion
+            if file_ext == '.dwg':
+                with st.spinner(f"Converting {drawing_file.name} DWG to DXF..."):
+                    try:
+                        dxf_path = FileConverter.convert_dwg_to_dxf(tmp_path)
+                        tmp_path = dxf_path
+                        st.success(f"✅ Converted **{drawing_file.name}** to DXF successfully.")
+                    except RuntimeError as e:
+                        st.error(
+                            f"⚠️ Could not convert {drawing_file.name} automatically.\n\n"
+                            f"**What to do:** Open the DWG in AutoCAD or BricsCAD → File → Save As → DXF, "
+                            f"then upload the DXF version.\n\n"
+                            f"_Technical detail: {str(e)}_"
+                        )
+                        continue  # Skip this file, process the rest
 
-        tmp_paths.append((drawing_file.name, tmp_path))
+            tmp_paths.append((drawing_file.name, tmp_path))
 
-    if not tmp_paths:
-        st.error("No valid drawing files to process.")
-        st.stop()
-
-    # ─── Display file count ───────────────────────────────────────────────────
-    drawing_names = [name for name, _ in tmp_paths]
-    drawing_name_combined = " + ".join(drawing_names)
-    if len(tmp_paths) > 1:
-        st.info(f"📂 **{len(tmp_paths)} drawing files** uploaded for combined analysis.")
-
-    # ─── Run Quick Scan (shared between tabs) ──────────────────────────────────
-    # Quick Scan tab shows first file. For multi-file feedback sheet, merge all scans.
-    scan = None
-    scan_for_feedback = None
-    with st.spinner("Running quick scan..."):
-        try:
-            engine = TraceQEngine()
-            scan = engine.quick_scan(tmp_paths[0][1])
-            # For multi-file: merge unrecognised blocks/layers from ALL files
-            if len(tmp_paths) > 1:
-                import copy
-                scan_for_feedback = copy.deepcopy(scan)
-                all_unrec_blocks = {}
-                all_unrec_layers = set()
-                for _, fpath in tmp_paths:
-                    fs = engine.quick_scan(fpath)
-                    for ub in (getattr(fs, 'unrecognised_blocks', []) or []):
-                        bname = ub.get('block', ub) if isinstance(ub, dict) else str(ub)
-                        cnt = ub.get('count', 0) if isinstance(ub, dict) else 0
-                        if bname in all_unrec_blocks:
-                            all_unrec_blocks[bname]['count'] += cnt
-                        else:
-                            all_unrec_blocks[bname] = {'block': bname, 'count': cnt}
-                    for ul in (getattr(fs, 'unrecognised_layers', []) or []):
-                        layer_name = ul if isinstance(ul, str) else str(ul)
-                        all_unrec_layers.add(layer_name)
-                scan_for_feedback.unrecognised_blocks = list(all_unrec_blocks.values())
-                scan_for_feedback.unrecognised_layers = list(all_unrec_layers)
-            else:
-                scan_for_feedback = scan
-        except Exception as e:
-            st.error(f"Quick scan failed: {str(e)}")
-
-    # ─── Step 0: Quick Scan + Full Analysis Tabs ──────────────────────────────
-    tab_scan, tab_analysis = st.tabs(["Step 0: Quick Scan", "Full Analysis"])
-
-    # ═══ TAB 1: QUICK SCAN ═══════════════════════════════════════════════════
-    with tab_scan:
-        st.markdown("### Step 0 — Compatibility Scan")
-        st.caption("Quick check: how much of this drawing does TraceQ recognise?")
-
-        if scan and scan._dwg_unsupported:
-            st.error(scan.verdict_msg)
-        elif scan:
-            # ── Overall Score ──
-            if scan.verdict == 'HIGH':
-                score_color = "🟢"
-                st.success(f"{score_color} **Overall Compatibility: {scan.overall_score}% — HIGH**")
-                st.info(scan.verdict_msg)
-            elif scan.verdict == 'MEDIUM':
-                score_color = "🟡"
-                st.warning(f"{score_color} **Overall Compatibility: {scan.overall_score}% — MEDIUM**")
-                st.info(scan.verdict_msg)
-            else:
-                score_color = "🔴"
-                st.error(f"{score_color} **Overall Compatibility: {scan.overall_score}% — LOW**")
-                st.info(scan.verdict_msg)
-
-            # ── Score Breakdown ──
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Layers", f"{scan.layer_score}%",
-                          delta=f"{len(scan.recognised_layers)}/{scan.hvac_candidate_layers}")
-            with col2:
-                st.metric("Blocks", f"{scan.block_score}%",
-                          delta=f"{len(scan.recognised_blocks)}/{scan.total_blocks}")
-            with col3:
-                st.metric("Text Patterns", f"{scan.mtext_score}%",
-                          delta=f"{scan.mtext_pattern_hits}/{scan.total_mtext_patterns}")
-            with col4:
-                st.metric("Total Entities", f"{scan.total_entities:,}")
-
-            st.markdown("---")
-
-            # ── Recognised Layers ──
-            if scan.recognised_layers:
-                with st.expander(f"✅ Recognised Layers ({len(scan.recognised_layers)})", expanded=True):
-                    layer_data = []
-                    for rl in scan.recognised_layers:
-                        layer_data.append({
-                            "Layer Name": rl['layer'],
-                            "Equipment Type": rl['equipment_type'].replace('_', ' ').title(),
-                            "Confidence": f"{rl['confidence']:.0%}",
-                            "Match": rl['method'],
-                        })
-                    st.dataframe(layer_data, use_container_width=True, hide_index=True)
-
-            # ── Unrecognised Layers ──
-            if scan.unrecognised_layers:
-                with st.expander(f"❓ Unrecognised Layers ({len(scan.unrecognised_layers)})", expanded=False):
-                    st.caption("These layers may contain equipment that TraceQ doesn't recognise yet. Nestor can help identify them.")
-                    for ul in scan.unrecognised_layers:
-                        st.text(f"  {ul}")
-
-            # ── Recognised Blocks ──
-            if scan.recognised_blocks:
-                with st.expander(f"✅ Recognised Blocks ({len(scan.recognised_blocks)})", expanded=True):
-                    block_data = []
-                    for rb in scan.recognised_blocks:
-                        block_data.append({
-                            "Block Name": rb['block'],
-                            "Equipment Type": rb['equipment_type'].replace('_', ' ').title(),
-                            "Count": rb['count'],
-                            "Match": rb['match'],
-                        })
-                    st.dataframe(block_data, use_container_width=True, hide_index=True)
-
-            # ── Unrecognised Blocks ──
-            if scan.unrecognised_blocks:
-                with st.expander(f"❓ Unrecognised Blocks ({len(scan.unrecognised_blocks)})", expanded=False):
-                    st.caption("These blocks may be equipment. Nestor can identify them to expand the dictionary.")
-                    block_unk = []
-                    for ub in scan.unrecognised_blocks:
-                        block_unk.append({
-                            "Block Name": ub['block'],
-                            "Occurrences": ub['count'],
-                        })
-                    st.dataframe(block_unk, use_container_width=True, hide_index=True)
-
-            st.markdown("---")
-            st.caption("Tip: After running the full analysis, send unrecognised items to Nestor for identification. His corrections will permanently improve TraceQ's accuracy.")
-
-    # ═══ TAB 2: FULL ANALYSIS ════════════════════════════════════════════════
-    with tab_analysis:
-        # ─── Analyse all drawing files with multi-view dedup ─────────────────────
-        all_results = []
-        combined_merged = {}
-        combined_parse_info = {'layers': 0, 'block_types': 0}
-        combined_dedup_report = None
-
-        with st.spinner(f"Analysing {'drawings' if len(tmp_paths) > 1 else 'drawing'}... this may take a moment."):
-            engine = TraceQEngine()
-
-            # Use analyze_multi for multi-view dedup + non-layout file filtering
-            file_paths = [fpath for _, fpath in tmp_paths]
-            multi_result = engine.analyze_multi(file_paths)
-
-            all_results = multi_result['results']
-            combined_merged = multi_result['combined']
-            skipped_files = multi_result.get('skipped', [])
-            floor_groups = multi_result.get('floor_groups', [])
-
-            # Merge parse info from all results
-            for fname, result in all_results:
-                p = result.parse_info
-                combined_parse_info['layers'] += p.get('layers', 0)
-                combined_parse_info['block_types'] += p.get('block_types', 0)
-
-            # Use the last result's dedup report (proximity dedup within single files)
-            if all_results:
-                result = all_results[-1][1]
-                combined_dedup_report = getattr(result, 'dedup_report', None)
-
-        # Clean up temp files
-        for _, fpath in tmp_paths:
-            try:
-                os.unlink(fpath)
-            except OSError:
-                pass
-
-        if not all_results:
-            st.error("No drawing files could be analysed.")
+        if not tmp_paths:
+            st.error("No valid drawing files to process.")
             st.stop()
 
-        # ─── Results Header ───────────────────────────────────────────────────────
-        if len(all_results) == 1:
-            st.success(f"✅ Analysis complete — **{all_results[0][0]}**")
-        else:
-            msg = f"✅ Analysis complete — **{len(all_results)} files** combined"
-            if skipped_files:
-                msg += f" ({len(skipped_files)} non-layout files filtered)"
-            has_multi_view = any(len(g) > 1 for g in floor_groups)
-            if has_multi_view:
-                msg += " with multi-view deduplication"
-            st.success(msg)
-        st.markdown("---")
+        # ─── Display file count ───────────────────────────────────────────────────
+        drawing_names = [name for name, _ in tmp_paths]
+        drawing_name_combined = " + ".join(drawing_names)
+        if len(tmp_paths) > 1:
+            st.info(f"📂 **{len(tmp_paths)} drawing files** uploaded for combined analysis.")
 
-        # ─── Key Metrics ──────────────────────────────────────────────────────────
-        merged = combined_merged
-        total_items = sum(v.get('count', 0) for v in merged.values())
-        total_categories = len(merged)
-        parser_info = combined_parse_info
-        _dname = drawing_names[0].split('.')[0] if len(drawing_names) == 1 else f"{len(drawing_names)}_files"
+        # ─── Run Quick Scan (shared between tabs) ──────────────────────────────────
+        # Quick Scan tab shows first file. For multi-file feedback sheet, merge all scans.
+        scan = None
+        scan_for_feedback = None
+        with st.spinner("Running quick scan..."):
+            try:
+                engine = TraceQEngine()
+                scan = engine.quick_scan(tmp_paths[0][1])
+                # For multi-file: merge unrecognised blocks/layers from ALL files
+                if len(tmp_paths) > 1:
+                    import copy
+                    scan_for_feedback = copy.deepcopy(scan)
+                    all_unrec_blocks = {}
+                    all_unrec_layers = set()
+                    for _, fpath in tmp_paths:
+                        fs = engine.quick_scan(fpath)
+                        for ub in (getattr(fs, 'unrecognised_blocks', []) or []):
+                            bname = ub.get('block', ub) if isinstance(ub, dict) else str(ub)
+                            cnt = ub.get('count', 0) if isinstance(ub, dict) else 0
+                            if bname in all_unrec_blocks:
+                                all_unrec_blocks[bname]['count'] += cnt
+                            else:
+                                all_unrec_blocks[bname] = {'block': bname, 'count': cnt}
+                        for ul in (getattr(fs, 'unrecognised_layers', []) or []):
+                            layer_name = ul if isinstance(ul, str) else str(ul)
+                            all_unrec_layers.add(layer_name)
+                    scan_for_feedback.unrecognised_blocks = list(all_unrec_blocks.values())
+                    scan_for_feedback.unrecognised_layers = list(all_unrec_layers)
+                else:
+                    scan_for_feedback = scan
+            except Exception as e:
+                st.error(f"Quick scan failed: {str(e)}")
 
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Total Equipment", f"{total_items:,}")
-        with col2:
-            st.metric("Categories Found", total_categories)
-        with col3:
-            st.metric("Layers Scanned", parser_info.get('layers', 0))
-        with col4:
-            st.metric("Block Types", parser_info.get('block_types', 0))
+        # ─── Step 0: Quick Scan + Full Analysis Tabs ──────────────────────────────
+        tab_scan, tab_analysis = st.tabs(["Step 0: Quick Scan", "Full Analysis"])
 
-        st.markdown("---")
+        # ═══ TAB 1: QUICK SCAN ═══════════════════════════════════════════════════
+        with tab_scan:
+            st.markdown("### Step 0 — Compatibility Scan")
+            st.caption("Quick check: how much of this drawing does TraceQ recognise?")
 
-        # ─── Equipment Inventory ──────────────────────────────────────────────────
-        st.markdown("### 📋 Equipment Inventory")
+            if scan and scan._dwg_unsupported:
+                st.error(scan.verdict_msg)
+            elif scan:
+                # ── Overall Score ──
+                if scan.verdict == 'HIGH':
+                    score_color = "🟢"
+                    st.success(f"{score_color} **Overall Compatibility: {scan.overall_score}% — HIGH**")
+                    st.info(scan.verdict_msg)
+                elif scan.verdict == 'MEDIUM':
+                    score_color = "🟡"
+                    st.warning(f"{score_color} **Overall Compatibility: {scan.overall_score}% — MEDIUM**")
+                    st.info(scan.verdict_msg)
+                else:
+                    score_color = "🔴"
+                    st.error(f"{score_color} **Overall Compatibility: {scan.overall_score}% — LOW**")
+                    st.info(scan.verdict_msg)
 
-        table_data = []
-        review_items = []
-        for equip_type, data in sorted(merged.items()):
-            count = data.get('count', 0)
-            source = data.get('source', 'unknown')
-            confidence = data.get('confidence', 0)
-            alt = data.get('alternate_counts', {})
-            flagged = data.get('needs_review', False)
+                # ── Score Breakdown ──
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Layers", f"{scan.layer_score}%",
+                              delta=f"{len(scan.recognised_layers)}/{scan.hvac_candidate_layers}")
+                with col2:
+                    st.metric("Blocks", f"{scan.block_score}%",
+                              delta=f"{len(scan.recognised_blocks)}/{scan.total_blocks}")
+                with col3:
+                    st.metric("Text Patterns", f"{scan.mtext_score}%",
+                              delta=f"{scan.mtext_pattern_hits}/{scan.total_mtext_patterns}")
+                with col4:
+                    st.metric("Total Entities", f"{scan.total_entities:,}")
 
-            if 'tier1' in source:
-                source_label = "🟢 Layer"
-            elif 'tier2' in source:
-                source_label = "🔵 Block"
-            elif 'tier3' in source:
-                source_label = "🟡 Text"
+                st.markdown("---")
+
+                # ── Recognised Layers ──
+                if scan.recognised_layers:
+                    with st.expander(f"✅ Recognised Layers ({len(scan.recognised_layers)})", expanded=True):
+                        layer_data = []
+                        for rl in scan.recognised_layers:
+                            layer_data.append({
+                                "Layer Name": rl['layer'],
+                                "Equipment Type": rl['equipment_type'].replace('_', ' ').title(),
+                                "Confidence": f"{rl['confidence']:.0%}",
+                                "Match": rl['method'],
+                            })
+                        st.dataframe(layer_data, use_container_width=True, hide_index=True)
+
+                # ── Unrecognised Layers ──
+                if scan.unrecognised_layers:
+                    with st.expander(f"❓ Unrecognised Layers ({len(scan.unrecognised_layers)})", expanded=False):
+                        st.caption("These layers may contain equipment that TraceQ doesn't recognise yet. Nestor can help identify them.")
+                        for ul in scan.unrecognised_layers:
+                            st.text(f"  {ul}")
+
+                # ── Recognised Blocks ──
+                if scan.recognised_blocks:
+                    with st.expander(f"✅ Recognised Blocks ({len(scan.recognised_blocks)})", expanded=True):
+                        block_data = []
+                        for rb in scan.recognised_blocks:
+                            block_data.append({
+                                "Block Name": rb['block'],
+                                "Equipment Type": rb['equipment_type'].replace('_', ' ').title(),
+                                "Count": rb['count'],
+                                "Match": rb['match'],
+                            })
+                        st.dataframe(block_data, use_container_width=True, hide_index=True)
+
+                # ── Unrecognised Blocks ──
+                if scan.unrecognised_blocks:
+                    with st.expander(f"❓ Unrecognised Blocks ({len(scan.unrecognised_blocks)})", expanded=False):
+                        st.caption("These blocks may be equipment. Nestor can identify them to expand the dictionary.")
+                        block_unk = []
+                        for ub in scan.unrecognised_blocks:
+                            block_unk.append({
+                                "Block Name": ub['block'],
+                                "Occurrences": ub['count'],
+                            })
+                        st.dataframe(block_unk, use_container_width=True, hide_index=True)
+
+                st.markdown("---")
+                st.caption("Tip: After running the full analysis, send unrecognised items to Nestor for identification. His corrections will permanently improve TraceQ's accuracy.")
+
+        # ═══ TAB 2: FULL ANALYSIS ════════════════════════════════════════════════
+        with tab_analysis:
+            # ─── Analyse all drawing files with multi-view dedup ─────────────────────
+            all_results = []
+            combined_merged = {}
+            combined_parse_info = {'layers': 0, 'block_types': 0}
+            combined_dedup_report = None
+
+            with st.spinner(f"Analysing {'drawings' if len(tmp_paths) > 1 else 'drawing'}... this may take a moment."):
+                engine = TraceQEngine()
+
+                # Use analyze_multi for multi-view dedup + non-layout file filtering
+                file_paths = [fpath for _, fpath in tmp_paths]
+                multi_result = engine.analyze_multi(file_paths)
+
+                all_results = multi_result['results']
+                combined_merged = multi_result['combined']
+                skipped_files = multi_result.get('skipped', [])
+                floor_groups = multi_result.get('floor_groups', [])
+
+                # Merge parse info from all results
+                for fname, result in all_results:
+                    p = result.parse_info
+                    combined_parse_info['layers'] += p.get('layers', 0)
+                    combined_parse_info['block_types'] += p.get('block_types', 0)
+
+                # Use the last result's dedup report (proximity dedup within single files)
+                if all_results:
+                    result = all_results[-1][1]
+                    combined_dedup_report = getattr(result, 'dedup_report', None)
+
+            # Clean up temp files
+            for _, fpath in tmp_paths:
+                try:
+                    os.unlink(fpath)
+                except OSError:
+                    pass
+
+            if not all_results:
+                st.error("No drawing files could be analysed.")
+                st.stop()
+
+            # ─── Results Header ───────────────────────────────────────────────────────
+            if len(all_results) == 1:
+                st.success(f"✅ Analysis complete — **{all_results[0][0]}**")
             else:
-                source_label = f"⚪ {source}"
+                msg = f"✅ Analysis complete — **{len(all_results)} files** combined"
+                if skipped_files:
+                    msg += f" ({len(skipped_files)} non-layout files filtered)"
+                has_multi_view = any(len(g) > 1 for g in floor_groups)
+                if has_multi_view:
+                    msg += " with multi-view deduplication"
+                st.success(msg)
+            st.markdown("---")
 
-            name = _format_equipment_name(equip_type)
+            # ─── Key Metrics ──────────────────────────────────────────────────────────
+            merged = combined_merged
+            total_items = sum(v.get('count', 0) for v in merged.values())
+            total_categories = len(merged)
+            parser_info = combined_parse_info
+            _dname = drawing_names[0].split('.')[0] if len(drawing_names) == 1 else f"{len(drawing_names)}_files"
 
-            # Show all three tier counts explicitly
-            t1 = alt.get('tier1', 0)
-            t2 = alt.get('tier2', 0)
-            t3 = alt.get('tier3', 0)
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Equipment", f"{total_items:,}")
+            with col2:
+                st.metric("Categories Found", total_categories)
+            with col3:
+                st.metric("Layers Scanned", parser_info.get('layers', 0))
+            with col4:
+                st.metric("Block Types", parser_info.get('block_types', 0))
 
-            row = {
-                "Equipment": name,
-                "Count": count,
-                "Source": source_label,
-                "Confidence": f"{int(confidence * 100)}%",
-                "Layer": t1 if t1 > 0 else "—",
-                "Block": t2 if t2 > 0 else "—",
-                "Text": t3 if t3 > 0 else "—",
-            }
+            st.markdown("---")
 
-            if flagged:
-                row["Flag"] = "⚠️ Review"
-                review_items.append({
-                    'name': name,
-                    'note': data.get('notes', 'Tier counts disagree significantly.'),
-                    'tier1': t1, 'tier2': t2, 'tier3': t3,
-                })
-            else:
-                row["Flag"] = "✅"
+            # ─── Equipment Inventory ──────────────────────────────────────────────────
+            st.markdown("### 📋 Equipment Inventory")
 
-            table_data.append(row)
+            table_data = []
+            review_items = []
+            for equip_type, data in sorted(merged.items()):
+                count = data.get('count', 0)
+                source = data.get('source', 'unknown')
+                confidence = data.get('confidence', 0)
+                alt = data.get('alternate_counts', {})
+                flagged = data.get('needs_review', False)
 
-        if table_data:
-            st.dataframe(
-                table_data,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Equipment": st.column_config.TextColumn("Equipment", width="medium"),
-                    "Count": st.column_config.NumberColumn("Count", width="small"),
-                    "Source": st.column_config.TextColumn("Source", width="small"),
-                    "Confidence": st.column_config.TextColumn("Conf.", width="small"),
-                    "Layer": st.column_config.TextColumn("Layer (T1)", width="small"),
-                    "Block": st.column_config.TextColumn("Block (T2)", width="small"),
-                    "Text": st.column_config.TextColumn("Text (T3)", width="small"),
-                    "Flag": st.column_config.TextColumn("Status", width="small"),
+                if 'tier1' in source:
+                    source_label = "🟢 Layer"
+                elif 'tier2' in source:
+                    source_label = "🔵 Block"
+                elif 'tier3' in source:
+                    source_label = "🟡 Text"
+                else:
+                    source_label = f"⚪ {source}"
+
+                name = _format_equipment_name(equip_type)
+
+                # Show all three tier counts explicitly
+                t1 = alt.get('tier1', 0)
+                t2 = alt.get('tier2', 0)
+                t3 = alt.get('tier3', 0)
+
+                row = {
+                    "Equipment": name,
+                    "Count": count,
+                    "Source": source_label,
+                    "Confidence": f"{int(confidence * 100)}%",
+                    "Layer": t1 if t1 > 0 else "—",
+                    "Block": t2 if t2 > 0 else "—",
+                    "Text": t3 if t3 > 0 else "—",
                 }
-            )
 
-        # Show review warnings if any
-        if review_items:
-            st.markdown("#### ⚠️ Items Flagged for QS Review")
-            for item in review_items:
-                st.warning(
-                    f"**{item['name']}** — Tier counts disagree: "
-                    f"Layer={item['tier1']}, Block={item['tier2']}, Text={item['tier3']}. "
-                    f"Recommend manual verification."
+                if flagged:
+                    row["Flag"] = "⚠️ Review"
+                    review_items.append({
+                        'name': name,
+                        'note': data.get('notes', 'Tier counts disagree significantly.'),
+                        'tier1': t1, 'tier2': t2, 'tier3': t3,
+                    })
+                else:
+                    row["Flag"] = "✅"
+
+                table_data.append(row)
+
+            if table_data:
+                st.dataframe(
+                    table_data,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Equipment": st.column_config.TextColumn("Equipment", width="medium"),
+                        "Count": st.column_config.NumberColumn("Count", width="small"),
+                        "Source": st.column_config.TextColumn("Source", width="small"),
+                        "Confidence": st.column_config.TextColumn("Conf.", width="small"),
+                        "Layer": st.column_config.TextColumn("Layer (T1)", width="small"),
+                        "Block": st.column_config.TextColumn("Block (T2)", width="small"),
+                        "Text": st.column_config.TextColumn("Text (T3)", width="small"),
+                        "Flag": st.column_config.TextColumn("Status", width="small"),
+                    }
                 )
 
-        # Show dedup report if any proximity deductions were made
-        dedup_report = result.detection_results.get('dedup_report', {})
-        if dedup_report:
-            adjustments = dedup_report.get('adjustments', [])
-            if adjustments:
-                with st.expander(f"🔗 Proximity Deduplication ({len(adjustments)} adjustments)", expanded=False):
-                    st.caption(
-                        "Text labels found near block INSERTs of the same equipment type — "
-                        "Tier 3 count reduced to avoid double-counting."
-                    )
-                    for adj in adjustments:
-                        st.info(
-                            f"**{_format_equipment_name(adj.get('equipment_type', ''))}** — "
-                            f"Tier 3 reduced from {adj.get('tier3_original', 0)} to {adj.get('tier3_adjusted', 0)} "
-                            f"({adj.get('shadowed_by_blocks', 0)} text labels near blocks, "
-                            f"radius: {dedup_report.get('radius_used', 0):.0f} units)"
-                        )
-
-        st.markdown("---")
-
-        # ─── BOQ Comparison (if BOQ uploaded) ─────────────────────────────────────
-        if boq_file is not None:
-            st.markdown("### 📊 BOQ Discrepancy Report")
-
-            try:
-                boq_bytes = boq_file.read()
-                boq_items = parse_boq(boq_bytes, boq_file.name)
-
-                if boq_items:
-                    comparisons, missing_from_boq = compare_boq_vs_drawing(boq_items, merged)
-
-                    # ── Summary Metrics ──
-                    matches = sum(1 for c in comparisons if c['Risk'] == 'MATCH')
-                    discrepancies = sum(1 for c in comparisons if c['Risk'] == 'DISCREPANCY')
-                    missing_count = len(missing_from_boq)
-                    comparison_exp = sum(c.get('_exposure_num') or 0 for c in comparisons)
-                    missing_exp = sum(m.get('_est_exposure') or 0 for m in missing_from_boq)
-                    total_exposure = comparison_exp + missing_exp
-
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("Matched", matches)
-                    with col2:
-                        st.metric("Discrepancies", discrepancies)
-                    with col3:
-                        st.metric("Missing from BOQ", missing_count)
-                    with col4:
-                        st.metric("Total Exposure", f"AED {total_exposure:,.0f}")
-
-                    # ── EXCEL DOWNLOAD — top of report ──
-                    excel_bytes = generate_excel_report(
-                        comparisons, missing_from_boq, boq_items,
-                        drawing_name_combined, boq_file.name,
-                        merged=merged,
-                        dedup_report=result.detection_results.get('dedup_report'),
-                    )
-                    report_filename = f"TraceQ_BOQ_Report_{_dname}_{datetime.now().strftime('%Y%m%d')}.xlsx"
-
-                    col_dl1, col_dl2 = st.columns(2)
-                    with col_dl1:
-                        st.download_button(
-                            label="📥 Download BOQ Report (Client)",
-                            data=excel_bytes,
-                            file_name=report_filename,
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            type="primary",
-                        )
-                    with col_dl2:
-                        nestor_bytes = generate_nestor_feedback(
-                            comparisons, missing_from_boq, merged,
-                            drawing_name_combined,
-                            scan=scan_for_feedback,
-                        )
-                        nestor_filename = f"TraceQ_QS_Feedback_{_dname}_{datetime.now().strftime('%Y%m%d')}.xlsx"
-                        st.download_button(
-                            label="📋 Download QS Feedback Sheet",
-                            data=nestor_bytes,
-                            file_name=nestor_filename,
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        )
-
-                    st.markdown("---")
-
-                    # ── Main Comparison Table ──
-                    st.markdown("#### Comparison Details")
-
-                    display_comparisons = []
-                    for c in comparisons:
-                        display_comparisons.append({
-                            'Trace ID': c['Trace ID'],
-                            'Equipment': c['Equipment'],
-                            'BOQ Qty': c['BOQ Qty'],
-                            'Drawing Qty': c['Drawing Qty'],
-                            'Diff': c['Difference'],
-                            'Unit': c['Unit'],
-                            'Status': c['Risk'],
-                            'Exposure (AED)': c['Exposure (AED)'],
-                            'Notes': c['Notes'],
-                        })
-
-                    st.dataframe(
-                        display_comparisons,
-                        use_container_width=True,
-                        hide_index=True,
-                        column_config={
-                            "Trace ID": st.column_config.TextColumn("Trace ID", width="small"),
-                            "Equipment": st.column_config.TextColumn("Equipment", width="medium"),
-                            "BOQ Qty": st.column_config.TextColumn("BOQ", width="small"),
-                            "Drawing Qty": st.column_config.TextColumn("Drawing", width="small"),
-                            "Diff": st.column_config.TextColumn("Diff", width="small"),
-                            "Unit": st.column_config.TextColumn("Unit", width="small"),
-                            "Status": st.column_config.TextColumn("Status", width="small"),
-                            "Exposure (AED)": st.column_config.TextColumn("Exposure", width="small"),
-                            "Notes": st.column_config.TextColumn("Notes", width="large"),
-                        }
+            # Show review warnings if any
+            if review_items:
+                st.markdown("#### ⚠️ Items Flagged for QS Review")
+                for item in review_items:
+                    st.warning(
+                        f"**{item['name']}** — Tier counts disagree: "
+                        f"Layer={item['tier1']}, Block={item['tier2']}, Text={item['tier3']}. "
+                        f"Recommend manual verification."
                     )
 
-                    # ── Missing from BOQ ──
-                    if missing_from_boq:
-                        st.markdown(f"#### Items in Drawing Not in BOQ ({missing_count} items)")
-                        st.caption("These items were detected in the drawing but have no corresponding BOQ line item.")
+            # Show dedup report if any proximity deductions were made
+            dedup_report = result.detection_results.get('dedup_report', {})
+            if dedup_report:
+                adjustments = dedup_report.get('adjustments', [])
+                if adjustments:
+                    with st.expander(f"🔗 Proximity Deduplication ({len(adjustments)} adjustments)", expanded=False):
+                        st.caption(
+                            "Text labels found near block INSERTs of the same equipment type — "
+                            "Tier 3 count reduced to avoid double-counting."
+                        )
+                        for adj in adjustments:
+                            st.info(
+                                f"**{_format_equipment_name(adj.get('equipment_type', ''))}** — "
+                                f"Tier 3 reduced from {adj.get('tier3_original', 0)} to {adj.get('tier3_adjusted', 0)} "
+                                f"({adj.get('shadowed_by_blocks', 0)} text labels near blocks, "
+                                f"radius: {dedup_report.get('radius_used', 0):.0f} units)"
+                            )
 
-                        missing_display = []
-                        for m in missing_from_boq:
-                            missing_display.append({
-                                'Trace ID': m['Trace ID'],
-                                'Equipment': m['Equipment'],
-                                'Drawing Qty': m['Drawing Qty'],
-                                'Detection': m['Detection'],
-                                'Confidence': m['Confidence'],
-                                'Notes': m['Notes'],
+            st.markdown("---")
+
+            # ─── BOQ Comparison (if BOQ uploaded) ─────────────────────────────────────
+            if boq_file is not None:
+                st.markdown("### 📊 BOQ Discrepancy Report")
+
+                try:
+                    boq_bytes = boq_file.read()
+                    boq_items = parse_boq(boq_bytes, boq_file.name)
+
+                    if boq_items:
+                        comparisons, missing_from_boq = compare_boq_vs_drawing(boq_items, merged)
+
+                        # ── Summary Metrics ──
+                        matches = sum(1 for c in comparisons if c['Risk'] == 'MATCH')
+                        discrepancies = sum(1 for c in comparisons if c['Risk'] == 'DISCREPANCY')
+                        missing_count = len(missing_from_boq)
+                        comparison_exp = sum(c.get('_exposure_num') or 0 for c in comparisons)
+                        missing_exp = sum(m.get('_est_exposure') or 0 for m in missing_from_boq)
+                        total_exposure = comparison_exp + missing_exp
+
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Matched", matches)
+                        with col2:
+                            st.metric("Discrepancies", discrepancies)
+                        with col3:
+                            st.metric("Missing from BOQ", missing_count)
+                        with col4:
+                            st.metric("Total Exposure", f"AED {total_exposure:,.0f}")
+
+                        # ── EXCEL DOWNLOAD — top of report ──
+                        excel_bytes = generate_excel_report(
+                            comparisons, missing_from_boq, boq_items,
+                            drawing_name_combined, boq_file.name,
+                            merged=merged,
+                            dedup_report=result.detection_results.get('dedup_report'),
+                        )
+                        report_filename = f"TraceQ_BOQ_Report_{_dname}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+
+                        col_dl1, col_dl2 = st.columns(2)
+                        with col_dl1:
+                            st.download_button(
+                                label="📥 Download BOQ Report (Client)",
+                                data=excel_bytes,
+                                file_name=report_filename,
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                type="primary",
+                            )
+                        with col_dl2:
+                            validator_bytes = generate_validator_template(
+                                comparisons, missing_from_boq, merged,
+                                drawing_name_combined,
+                                scan=scan_for_feedback,
+                            )
+                            validator_filename = f"TraceQ_Validator_{_dname}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+                            st.download_button(
+                                label="📋 Download Validator Template",
+                                data=validator_bytes,
+                                file_name=validator_filename,
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            )
+
+                        st.markdown("---")
+
+                        # ── Main Comparison Table ──
+                        st.markdown("#### Comparison Details")
+
+                        display_comparisons = []
+                        for c in comparisons:
+                            display_comparisons.append({
+                                'Trace ID': c['Trace ID'],
+                                'Equipment': c['Equipment'],
+                                'BOQ Qty': c['BOQ Qty'],
+                                'Drawing Qty': c['Drawing Qty'],
+                                'Diff': c['Difference'],
+                                'Unit': c['Unit'],
+                                'Status': c['Risk'],
+                                'Exposure (AED)': c['Exposure (AED)'],
+                                'Notes': c['Notes'],
                             })
 
                         st.dataframe(
-                            missing_display,
+                            display_comparisons,
                             use_container_width=True,
                             hide_index=True,
                             column_config={
                                 "Trace ID": st.column_config.TextColumn("Trace ID", width="small"),
                                 "Equipment": st.column_config.TextColumn("Equipment", width="medium"),
-                                "Drawing Qty": st.column_config.NumberColumn("Qty", width="small"),
-                                "Detection": st.column_config.TextColumn("Detection", width="medium"),
-                                "Confidence": st.column_config.TextColumn("Confidence", width="small"),
+                                "BOQ Qty": st.column_config.TextColumn("BOQ", width="small"),
+                                "Drawing Qty": st.column_config.TextColumn("Drawing", width="small"),
+                                "Diff": st.column_config.TextColumn("Diff", width="small"),
+                                "Unit": st.column_config.TextColumn("Unit", width="small"),
+                                "Status": st.column_config.TextColumn("Status", width="small"),
+                                "Exposure (AED)": st.column_config.TextColumn("Exposure", width="small"),
                                 "Notes": st.column_config.TextColumn("Notes", width="large"),
                             }
                         )
 
-                    # ── Parsed BOQ Line Items (detail expander) ──
-                    with st.expander("📄 Parsed BOQ Line Items", expanded=False):
-                        boq_display = []
-                        for item in boq_items:
-                            boq_display.append({
-                                "Ref": item.get('boq_ref', '—'),
-                                "Description": item['description'][:70],
-                                "Type": (item['equipment_type'] or '—').replace('_', ' ').title(),
-                                "Unit": item.get('unit', '—'),
-                                "Qty": int(item['qty']) if item['qty'] == int(item['qty']) else item['qty'],
-                                "Rate": f"{item['rate']:,.0f}" if item.get('rate') else '—',
-                                "Total": f"{item['total']:,.0f}" if item.get('total') else '—',
-                            })
-                        st.dataframe(boq_display, use_container_width=True, hide_index=True)
-                else:
-                    st.warning("Could not parse any equipment items from the BOQ file. Check the format.")
+                        # ── Missing from BOQ ──
+                        if missing_from_boq:
+                            st.markdown(f"#### Items in Drawing Not in BOQ ({missing_count} items)")
+                            st.caption("These items were detected in the drawing but have no corresponding BOQ line item.")
 
-            except Exception as e:
-                st.error(f"Error reading BOQ file: {str(e)}")
+                            missing_display = []
+                            for m in missing_from_boq:
+                                missing_display.append({
+                                    'Trace ID': m['Trace ID'],
+                                    'Equipment': m['Equipment'],
+                                    'Drawing Qty': m['Drawing Qty'],
+                                    'Detection': m['Detection'],
+                                    'Confidence': m['Confidence'],
+                                    'Notes': m['Notes'],
+                                })
+
+                            st.dataframe(
+                                missing_display,
+                                use_container_width=True,
+                                hide_index=True,
+                                column_config={
+                                    "Trace ID": st.column_config.TextColumn("Trace ID", width="small"),
+                                    "Equipment": st.column_config.TextColumn("Equipment", width="medium"),
+                                    "Drawing Qty": st.column_config.NumberColumn("Qty", width="small"),
+                                    "Detection": st.column_config.TextColumn("Detection", width="medium"),
+                                    "Confidence": st.column_config.TextColumn("Confidence", width="small"),
+                                    "Notes": st.column_config.TextColumn("Notes", width="large"),
+                                }
+                            )
+
+                        # ── Parsed BOQ Line Items (detail expander) ──
+                        with st.expander("📄 Parsed BOQ Line Items", expanded=False):
+                            boq_display = []
+                            for item in boq_items:
+                                boq_display.append({
+                                    "Ref": item.get('boq_ref', '—'),
+                                    "Description": item['description'][:70],
+                                    "Type": (item['equipment_type'] or '—').replace('_', ' ').title(),
+                                    "Unit": item.get('unit', '—'),
+                                    "Qty": int(item['qty']) if item['qty'] == int(item['qty']) else item['qty'],
+                                    "Rate": f"{item['rate']:,.0f}" if item.get('rate') else '—',
+                                    "Total": f"{item['total']:,.0f}" if item.get('total') else '—',
+                                })
+                            st.dataframe(boq_display, use_container_width=True, hide_index=True)
+                    else:
+                        st.warning("Could not parse any equipment items from the BOQ file. Check the format.")
+
+                except Exception as e:
+                    st.error(f"Error reading BOQ file: {str(e)}")
+
+                st.markdown("---")
+
+            # ─── Validation Results ───────────────────────────────────────────────────
+            st.markdown("### ⚠️ Validation Checks")
+
+            validation = result.validation_results
+            warnings = validation.get('warnings', [])
+
+            if not warnings:
+                st.success("All validation checks passed — no warnings.")
+            else:
+                for w in warnings:
+                    if isinstance(w, dict):
+                        severity = w.get('severity', 'info')
+                        msg = w.get('message', str(w))
+                        if severity == 'warning':
+                            st.warning(msg)
+                        elif severity == 'critical':
+                            st.error(msg)
+                        else:
+                            st.info(msg)
+                    else:
+                        w_str = str(w)
+                        if w_str.startswith('[WARNING]'):
+                            st.warning(w_str)
+                        elif w_str.startswith('[CRITICAL]'):
+                            st.error(w_str)
+                        else:
+                            st.info(w_str)
 
             st.markdown("---")
 
-        # ─── Validation Results ───────────────────────────────────────────────────
-        st.markdown("### ⚠️ Validation Checks")
+            # ─── Layer Classification ─────────────────────────────────────────────────
+            with st.expander("🗂️ Layer Classification Details", expanded=False):
+                layer_results = result.layer_classification
+                classified = []
+                unclassified = []
 
-        validation = result.validation_results
-        warnings = validation.get('warnings', [])
+                for layer_name, info in sorted(layer_results.items()):
+                    equip = info.get('equipment_type')
+                    conf = info.get('confidence', 0)
+                    method = info.get('method', 'unknown')
 
-        if not warnings:
-            st.success("All validation checks passed — no warnings.")
-        else:
-            for w in warnings:
-                if isinstance(w, dict):
-                    severity = w.get('severity', 'info')
-                    msg = w.get('message', str(w))
-                    if severity == 'warning':
-                        st.warning(msg)
-                    elif severity == 'critical':
-                        st.error(msg)
-                    else:
-                        st.info(msg)
-                else:
-                    w_str = str(w)
-                    if w_str.startswith('[WARNING]'):
-                        st.warning(w_str)
-                    elif w_str.startswith('[CRITICAL]'):
-                        st.error(w_str)
-                    else:
-                        st.info(w_str)
-
-        st.markdown("---")
-
-        # ─── Layer Classification ─────────────────────────────────────────────────
-        with st.expander("🗂️ Layer Classification Details", expanded=False):
-            layer_results = result.layer_classification
-            classified = []
-            unclassified = []
-
-            for layer_name, info in sorted(layer_results.items()):
-                equip = info.get('equipment_type')
-                conf = info.get('confidence', 0)
-                method = info.get('method', 'unknown')
-
-                if equip:
-                    classified.append({
-                        "Layer": layer_name,
-                        "Equipment Type": equip.replace('_', ' ').title(),
-                        "Confidence": f"{int(conf * 100)}%",
-                        "Match": method,
-                    })
-                else:
-                    unclassified.append(layer_name)
-
-            if classified:
-                st.markdown("**Classified Layers:**")
-                st.dataframe(classified, use_container_width=True, hide_index=True)
-
-            if unclassified:
-                st.markdown(f"**Unclassified Layers ({len(unclassified)}):**")
-                st.text(", ".join(unclassified))
-
-        # ─── Detection Tier Breakdown ─────────────────────────────────────────────
-        with st.expander("📊 Detection Tier Breakdown", expanded=False):
-            for tier_name in ['tier1', 'tier2', 'tier3']:
-                tier_data = result.detection_results.get(tier_name, {})
-                if tier_data:
-                    labels = {'tier1': '🟢 Tier 1 — Layer Detection',
-                              'tier2': '🔵 Tier 2 — Block Detection',
-                              'tier3': '🟡 Tier 3 — Text Detection'}
-                    st.markdown(f"**{labels[tier_name]}**")
-                    tier_items = []
-                    for equip, data in sorted(tier_data.items()):
-                        tier_items.append({
-                            "Equipment": equip.replace('_', ' ').title(),
-                            "Count": data.get('count', 0),
+                    if equip:
+                        classified.append({
+                            "Layer": layer_name,
+                            "Equipment Type": equip.replace('_', ' ').title(),
+                            "Confidence": f"{int(conf * 100)}%",
+                            "Match": method,
                         })
-                    st.dataframe(tier_items, use_container_width=True, hide_index=True)
+                    else:
+                        unclassified.append(layer_name)
 
-        # ─── Raw JSON Output ──────────────────────────────────────────────────────
-        with st.expander("🔧 Raw JSON Output", expanded=False):
-            st.json(result.to_dict())
+                if classified:
+                    st.markdown("**Classified Layers:**")
+                    st.dataframe(classified, use_container_width=True, hide_index=True)
 
-        # ─── Download Button (JSON fallback — always available) ───────────────────
-        st.markdown("---")
-        json_output = json.dumps(result.to_dict(), indent=2)
-        st.download_button(
-            label="📥 Download Full Analysis (JSON)",
-            data=json_output,
-            file_name=f"TraceQ_Analysis_{_dname}_{datetime.now().strftime('%Y%m%d')}.json",
-            mime="application/json",
-        )
+                if unclassified:
+                    st.markdown(f"**Unclassified Layers ({len(unclassified)}):**")
+                    st.text(", ".join(unclassified))
+
+            # ─── Detection Tier Breakdown ─────────────────────────────────────────────
+            with st.expander("📊 Detection Tier Breakdown", expanded=False):
+                for tier_name in ['tier1', 'tier2', 'tier3']:
+                    tier_data = result.detection_results.get(tier_name, {})
+                    if tier_data:
+                        labels = {'tier1': '🟢 Tier 1 — Layer Detection',
+                                  'tier2': '🔵 Tier 2 — Block Detection',
+                                  'tier3': '🟡 Tier 3 — Text Detection'}
+                        st.markdown(f"**{labels[tier_name]}**")
+                        tier_items = []
+                        for equip, data in sorted(tier_data.items()):
+                            tier_items.append({
+                                "Equipment": equip.replace('_', ' ').title(),
+                                "Count": data.get('count', 0),
+                            })
+                        st.dataframe(tier_items, use_container_width=True, hide_index=True)
+
+            # ─── Raw JSON Output ──────────────────────────────────────────────────────
+            with st.expander("🔧 Raw JSON Output", expanded=False):
+                st.json(result.to_dict())
+
+            # ─── Download Button (JSON fallback — always available) ───────────────────
+            st.markdown("---")
+            json_output = json.dumps(result.to_dict(), indent=2)
+            st.download_button(
+                label="📥 Download Full Analysis (JSON)",
+                data=json_output,
+                file_name=f"TraceQ_Analysis_{_dname}_{datetime.now().strftime('%Y%m%d')}.json",
+                mime="application/json",
+            )
