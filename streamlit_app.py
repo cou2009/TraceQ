@@ -1666,9 +1666,9 @@ def render_validator_page():
         job_id = st.text_input("Job ID", value="TQ-TRAIN-S5", help="Job identifier for L1 Tracker logging.")
 
         tracker_file = st.file_uploader(
-            "L1 Feedback Tracker (optional)",
+            "L1 Feedback Tracker (override)",
             type=["xlsx"],
-            help="Upload your L1 Feedback Tracker to auto-populate it with validator data.",
+            help="Optional: upload a different L1 Tracker. The default one is loaded automatically.",
             key="tracker_upload",
         )
 
@@ -1843,8 +1843,22 @@ def render_validator_page():
     st.markdown("---")
     st.markdown("### L1 Feedback Tracker")
 
+    # Auto-load default tracker from repo, allow override via upload
+    tracker_bytes = None
     if tracker_file:
         tracker_bytes = tracker_file.read()
+        st.caption("Using uploaded L1 Tracker (override).")
+    else:
+        # Try to load default tracker from same directory as the app
+        default_tracker_path = os.path.join(os.path.dirname(__file__), "TraceQ_L1_Feedback_Tracker.xlsx")
+        if os.path.exists(default_tracker_path):
+            with open(default_tracker_path, "rb") as f:
+                tracker_bytes = f.read()
+            st.caption("Using default L1 Feedback Tracker from repo.")
+        else:
+            st.info("No L1 Tracker found. Upload one in the sidebar, or add `TraceQ_L1_Feedback_Tracker.xlsx` to the repo.")
+
+    if tracker_bytes:
         comparison_data = compare_validators(parsed[0], parsed[1]) if len(parsed) == 2 else None
 
         if st.button("Populate L1 Tracker", type="primary"):
@@ -1860,8 +1874,6 @@ def render_validator_page():
                     )
                 except Exception as e:
                     st.error(f"Error writing to tracker: {str(e)}")
-    else:
-        st.info("Upload your L1 Feedback Tracker in the sidebar to auto-populate it with validator data.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
