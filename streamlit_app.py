@@ -1850,13 +1850,13 @@ def render_validator_page():
         st.caption("Using uploaded L1 Tracker (override).")
     else:
         # Try to load default tracker from same directory as the app
-        default_tracker_path = os.path.join(os.path.dirname(__file__), "TraceQ_L1_Feedback_Tracker.xlsx")
+        default_tracker_path = os.path.join(os.path.dirname(__file__), "TraceQ L1 Feedback Tracker.xlsx")
         if os.path.exists(default_tracker_path):
             with open(default_tracker_path, "rb") as f:
                 tracker_bytes = f.read()
             st.caption("Using default L1 Feedback Tracker from repo.")
         else:
-            st.info("No L1 Tracker found. Upload one in the sidebar, or add `TraceQ_L1_Feedback_Tracker.xlsx` to the repo.")
+            st.info("No L1 Tracker found. Upload one in the sidebar, or add `TraceQ L1 Feedback Tracker.xlsx` to the repo.")
 
     if tracker_bytes:
         comparison_data = compare_validators(parsed[0], parsed[1]) if len(parsed) == 2 else None
