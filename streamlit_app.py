@@ -1258,7 +1258,7 @@ with st.sidebar:
     st.markdown("### Navigation")
     page = st.radio(
         "Select page:",
-        ["Engine Analysis", "Upload Validator Response"],
+        ["Engine Analysis", "Upload Validator Response", "Generate Client Report"],
         label_visibility="collapsed",
     )
     st.markdown("---")
@@ -1648,6 +1648,639 @@ def write_to_l1_tracker(tracker_bytes, job_id, validator_data_list, comparison=N
     return output.getvalue()
 
 
+def parse_engine_report(file_bytes):
+    """
+    Parse the original engine-generated BOQ Report XLSX.
+    Recovers comparisons, missing_from_boq, drawing name, BOQ name, and metadata.
+    Returns dict with all recovered data.
+    """
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+    result = {
+        'drawing_name': '',
+        'boq_name': '',
+        'comparisons': [],
+        'missing_from_boq': [],
+    }
+
+    # ── Parse Executive Summary for metadata ──
+    ws1 = wb.worksheets[0] if wb.worksheets else None
+    if ws1:
+        for r in range(4, 10):
+            label = str(ws1.cell(row=r, column=1).value or '').strip()
+            val = str(ws1.cell(row=r, column=2).value or '').strip()
+            if 'Drawing' in label:
+                result['drawing_name'] = val
+            elif 'BOQ' in label:
+                result['boq_name'] = val
+
+    # ── Parse BOQ Comparison tab ──
+    ws2 = None
+    for sn in wb.sheetnames:
+        if 'BOQ' in sn.upper() and 'COMPARISON' in sn.upper():
+            ws2 = wb[sn]
+            break
+    if ws2 is None and len(wb.sheetnames) >= 2:
+        ws2 = wb.worksheets[1]
+
+    if ws2:
+        # Find header row (look for "Description" or "Item No.")
+        header_row = 4  # default per generate_excel_report
+        for r in range(1, 8):
+            for c in range(1, 12):
+                val = ws2.cell(row=r, column=c).value
+                if val and 'DESCRIPTION' in str(val).upper():
+                    header_row = r
+                    break
+
+        for r in range(header_row + 1, ws2.max_row + 1):
+            desc = ws2.cell(row=r, column=2).value
+            if desc is None or str(desc).strip() == '':
+                # Check if this is the totals row or end
+                col7 = ws2.cell(row=r, column=7).value
+                if col7 and 'TOTAL' in str(col7).upper():
+                    break
+                continue
+
+            desc_str = str(desc).strip()
+            unit = str(ws2.cell(row=r, column=3).value or '').strip()
+            boq_qty = ws2.cell(row=r, column=4).value
+            drawing_qty = ws2.cell(row=r, column=5).value
+            variance = ws2.cell(row=r, column=6).value
+            var_pct = ws2.cell(row=r, column=7).value
+            exposure = ws2.cell(row=r, column=8).value
+            status = str(ws2.cell(row=r, column=9).value or '').strip()
+            trace_id = str(ws2.cell(row=r, column=10).value or '').strip()
+            notes = str(ws2.cell(row=r, column=11).value or '').strip()
+
+            # Recover numeric values
+            try:
+                boq_qty = float(boq_qty) if boq_qty is not None else 0
+            except (ValueError, TypeError):
+                boq_qty = 0
+            try:
+                drawing_qty = float(drawing_qty) if drawing_qty is not None else 0
+            except (ValueError, TypeError):
+                drawing_qty = 0
+            try:
+                exposure_num = float(exposure) if exposure not in (None, '', '—') else 0
+            except (ValueError, TypeError):
+                exposure_num = 0
+
+            # Calculate unit rate from exposure and variance
+            diff = abs(drawing_qty - boq_qty) if drawing_qty and boq_qty else 0
+            unit_rate = exposure_num / diff if diff > 0 and exposure_num > 0 else 0
+
+            # Classify equipment type
+            etype, label = _classify_description(desc_str)
+
+            result['comparisons'].append({
+                'Equipment': desc_str,
+                'Unit': unit,
+                'BOQ Qty': boq_qty,
+                'Drawing Qty': drawing_qty,
+                'Difference': variance,
+                'Variance %': var_pct,
+                'Risk': status,
+                'Trace ID': trace_id,
+                'Notes': notes,
+                'Exposure (AED)': f'AED {exposure_num:,.0f}' if exposure_num > 0 else '—',
+                '_exposure_num': exposure_num,
+                '_boq_qty': boq_qty,
+                '_unit_rate': unit_rate,
+                '_equipment_type': etype or '',
+            })
+
+    # ── Parse Missing from BOQ tab ──
+    ws3 = None
+    for sn in wb.sheetnames:
+        if 'MISSING' in sn.upper():
+            ws3 = wb[sn]
+            break
+    if ws3 is None and len(wb.sheetnames) >= 3:
+        ws3 = wb.worksheets[2]
+
+    if ws3:
+        header_row = 4
+        for r in range(1, 8):
+            for c in range(1, 9):
+                val = ws3.cell(row=r, column=c).value
+                if val and 'ITEM' in str(val).upper():
+                    header_row = r
+                    break
+
+        for r in range(header_row + 1, ws3.max_row + 1):
+            equip = ws3.cell(row=r, column=1).value
+            if equip is None or str(equip).strip() == '':
+                continue
+
+            equip_str = str(equip).strip()
+            if 'TOTAL' in equip_str.upper() or 'DISCLAIMER' in equip_str.upper():
+                break
+            if 'Unit rates' in equip_str or 'Actual costs' in equip_str:
+                break
+
+            detection = str(ws3.cell(row=r, column=2).value or '').strip()
+            qty_str = str(ws3.cell(row=r, column=3).value or '').strip()
+            unit_rate = ws3.cell(row=r, column=4).value
+            est_exp = ws3.cell(row=r, column=5).value
+            status = str(ws3.cell(row=r, column=6).value or '').strip()
+            trace_id = str(ws3.cell(row=r, column=7).value or '').strip()
+            notes = str(ws3.cell(row=r, column=8).value or '').strip()
+
+            # Extract numeric qty from "X nos." format
+            import re as _re
+            qty_match = _re.search(r'([\d,.]+)', qty_str)
+            qty = float(qty_match.group(1).replace(',', '')) if qty_match else 0
+
+            try:
+                unit_rate_num = float(unit_rate) if unit_rate not in (None, '', '—') else 0
+            except (ValueError, TypeError):
+                unit_rate_num = 0
+            try:
+                est_exp_num = float(est_exp) if est_exp not in (None, '', '—') else 0
+            except (ValueError, TypeError):
+                est_exp_num = 0
+
+            etype, label = _classify_description(equip_str)
+
+            result['missing_from_boq'].append({
+                'Equipment': equip_str,
+                'Detection': detection,
+                'Drawing Qty': qty,
+                'Trace ID': trace_id,
+                'Notes': notes,
+                '_unit_rate': unit_rate_num,
+                '_est_exposure': est_exp_num,
+                '_equipment_type': etype or '',
+            })
+
+    wb.close()
+    return result
+
+
+def extract_corrected_count(comments):
+    """Extract a corrected count from validator comments if present."""
+    import re as _re
+    if not comments:
+        return None
+    # Patterns like "correct count: 15", "should be 15", "actual: 15", "actual count is 32"
+    patterns = [
+        r'correct(?:ed)?\s*(?:count|qty|quantity)?\s*[:\-=]\s*(\d+)',
+        r'should\s+be\s+(\d+)',
+        r'actual\s*(?:count|qty|quantity)?\s*(?:is|[:\-=])\s*(\d+)',
+        r'count\s*(?:is|[:\-=])\s*(\d+)',
+    ]
+    for pat in patterns:
+        m = _re.search(pat, comments, _re.IGNORECASE)
+        if m:
+            return float(m.group(1))
+    return None
+
+
+def match_equipment_name(name1, name2):
+    """Fuzzy match two equipment names. Returns True if they likely refer to the same item."""
+    import re as _re
+    def _normalize(s):
+        s = s.upper().strip()
+        s = _re.sub(r'[^A-Z0-9\s]', '', s)
+        s = _re.sub(r'\s+', ' ', s)
+        return s
+
+    n1 = _normalize(name1)
+    n2 = _normalize(name2)
+
+    if n1 == n2:
+        return True
+    if n1 in n2 or n2 in n1:
+        return True
+    # Check if one is an abbreviation of the other (first letters match)
+    words1 = n1.split()
+    words2 = n2.split()
+    if len(words1) == 1 and len(words2) > 1:
+        abbrev = ''.join(w[0] for w in words2)
+        if n1 == abbrev:
+            return True
+    if len(words2) == 1 and len(words1) > 1:
+        abbrev = ''.join(w[0] for w in words1)
+        if n2 == abbrev:
+            return True
+    return False
+
+
+def merge_validated_data(engine_data, validator_data_list, comparison_result=None):
+    """
+    Merge engine report data with validator verdicts to produce client report data.
+    Returns (comparisons, missing_from_boq, metadata) in generate_excel_report format.
+
+    Rules:
+    - Validator YES: keep engine item
+    - Validator NO (both): exclude (engine error)
+    - Validators disagree: INCLUDE (conservative rule)
+    - Validator-corrected counts: use corrected count
+    - Discoveries: fold into missing_from_boq
+    """
+    merged_comparisons = []
+    merged_missing = []
+    metadata = {
+        'validation_method': 'Dual Validator (consensus)' if len(validator_data_list) == 2 else 'Single Validator',
+        'validator_names': [v['filename'].replace('.xlsx', '').replace('.XLSX', '') for v in validator_data_list],
+        'engine_errors_excluded': 0,
+        'validator_corrections': 0,
+        'discoveries_added': 0,
+        'conservative_includes': 0,
+    }
+
+    is_dual = len(validator_data_list) == 2 and comparison_result is not None
+
+    # ── Build validator verdict lookups ──
+    if is_dual:
+        # Use comparison_result for verdicts
+        boq_agreements = {item['equipment'].upper(): item for item in comparison_result.get('agreements', [])}
+        boq_divergences = {item['equipment'].upper(): item for item in comparison_result.get('divergences', [])}
+        boq_engine_errors = {item['equipment'].upper(): item for item in comparison_result.get('engine_errors', [])}
+
+        # Missing from BOQ — separate from BOQ comparison
+        miss_agreements = {}
+        miss_divergences = {}
+        miss_engine_errors = {}
+        for item in comparison_result.get('agreements', []):
+            if item.get('section') == 'Missing from BOQ':
+                miss_agreements[item['equipment'].upper()] = item
+        for item in comparison_result.get('divergences', []):
+            if item.get('section') == 'Missing from BOQ':
+                miss_divergences[item['equipment'].upper()] = item
+        for item in comparison_result.get('engine_errors', []):
+            if 'false positive' in item.get('issue', '').lower():
+                miss_engine_errors[item['equipment'].upper()] = item
+    else:
+        # Single validator — use raw parsed data
+        v1 = validator_data_list[0]
+        v1_boq = {item['equipment'].upper(): item for item in v1['boq_comparison']}
+        v1_miss = {item['equipment'].upper(): item for item in v1['missing_from_boq']}
+
+    # ── Process BOQ Comparison items ──
+    for comp in engine_data['comparisons']:
+        equip_upper = comp['Equipment'].upper()
+
+        if is_dual:
+            # Check engine errors first (both said NO)
+            if equip_upper in boq_engine_errors:
+                metadata['engine_errors_excluded'] += 1
+                continue  # Exclude from client report
+
+            # Check divergences (conservative include)
+            if equip_upper in boq_divergences:
+                div = boq_divergences[equip_upper]
+                comp['Notes'] = (comp['Notes'] + ' | Validator disagreement — included for review.').strip(' | ')
+                comp['_confidence'] = 'Conservative Include'
+                metadata['conservative_includes'] += 1
+                merged_comparisons.append(comp)
+                continue
+
+            # Check agreements
+            if equip_upper in boq_agreements:
+                agr = boq_agreements[equip_upper]
+                # Both said YES — confirmed
+                if agr.get('v1_agree') == 'YES' and agr.get('v2_agree') == 'YES':
+                    comp['_confidence'] = 'Validator Confirmed'
+                # Both said NO (already caught as engine error above, but safety)
+                elif agr.get('v1_agree') == 'NO' and agr.get('v2_agree') == 'NO':
+                    metadata['engine_errors_excluded'] += 1
+                    continue
+                else:
+                    # Both PARTIAL or other
+                    comments = '; '.join(filter(None, [agr.get('v1_comments', ''), agr.get('v2_comments', '')]))
+                    corrected = extract_corrected_count(comments)
+                    if corrected is not None:
+                        old_qty = comp.get('Drawing Qty', 0) or 0
+                        comp['Drawing Qty'] = corrected
+                        comp['Difference'] = corrected - comp['_boq_qty']
+                        if comp['_boq_qty'] > 0:
+                            comp['Variance %'] = f"{abs(comp['Difference']) / comp['_boq_qty'] * 100:.0f}%"
+                        comp['_exposure_num'] = abs(comp['Difference']) * comp.get('_unit_rate', 0)
+                        comp['Notes'] = (comp['Notes'] + f' | Validator corrected: {int(old_qty)} → {int(corrected)}').strip(' | ')
+                        comp['_confidence'] = 'Validator Corrected'
+                        metadata['validator_corrections'] += 1
+                    else:
+                        if comments:
+                            comp['Notes'] = (comp['Notes'] + f' | Validator: {comments[:100]}').strip(' | ')
+                        comp['_confidence'] = 'Validator Confirmed'
+                merged_comparisons.append(comp)
+                continue
+
+            # No validator match found — include as-is
+            comp['_confidence'] = 'Engine Only'
+            merged_comparisons.append(comp)
+
+        else:
+            # Single validator path
+            v_item = v1_boq.get(equip_upper)
+            if v_item is None:
+                # Try fuzzy match
+                for k, v in v1_boq.items():
+                    if match_equipment_name(equip_upper, k):
+                        v_item = v
+                        break
+
+            if v_item is None:
+                comp['_confidence'] = 'Engine Only'
+                merged_comparisons.append(comp)
+                continue
+
+            verdict = v_item.get('agree', '').upper()
+            comments = v_item.get('comments', '')
+
+            if verdict == 'NO':
+                # Check for corrected count
+                corrected = extract_corrected_count(comments)
+                if corrected is not None:
+                    old_qty = comp.get('Drawing Qty', 0) or 0
+                    comp['Drawing Qty'] = corrected
+                    comp['Difference'] = corrected - comp['_boq_qty']
+                    if comp['_boq_qty'] > 0:
+                        comp['Variance %'] = f"{abs(comp['Difference']) / comp['_boq_qty'] * 100:.0f}%"
+                    comp['_exposure_num'] = abs(comp['Difference']) * comp.get('_unit_rate', 0)
+                    comp['Notes'] = (comp['Notes'] + f' | Validator corrected: {int(old_qty)} → {int(corrected)}').strip(' | ')
+                    comp['_confidence'] = 'Validator Corrected'
+                    metadata['validator_corrections'] += 1
+                    merged_comparisons.append(comp)
+                else:
+                    # Exclude — engine error
+                    metadata['engine_errors_excluded'] += 1
+                continue
+            elif verdict == 'YES':
+                comp['_confidence'] = 'Validator Confirmed'
+                if comments:
+                    comp['Notes'] = (comp['Notes'] + f' | Validator: {comments[:100]}').strip(' | ')
+                merged_comparisons.append(comp)
+            else:
+                # PARTIAL or other — include with note
+                comp['_confidence'] = 'Validator Confirmed'
+                if comments:
+                    comp['Notes'] = (comp['Notes'] + f' | Validator: {comments[:100]}').strip(' | ')
+                merged_comparisons.append(comp)
+
+    # ── Process Missing from BOQ items ──
+    for m in engine_data['missing_from_boq']:
+        equip_upper = m['Equipment'].upper()
+
+        if is_dual:
+            if equip_upper in miss_engine_errors:
+                metadata['engine_errors_excluded'] += 1
+                continue
+
+            if equip_upper in miss_divergences:
+                m['Notes'] = (m['Notes'] + ' | Validator disagreement — included for review.').strip(' | ')
+                metadata['conservative_includes'] += 1
+                merged_missing.append(m)
+                continue
+
+            if equip_upper in miss_agreements:
+                agr = miss_agreements[equip_upper]
+                if agr.get('v1_agree') == 'NO' and agr.get('v2_agree') == 'NO':
+                    metadata['engine_errors_excluded'] += 1
+                    continue
+                merged_missing.append(m)
+                continue
+
+            # No verdict found — include as-is
+            merged_missing.append(m)
+        else:
+            v_item = v1_miss.get(equip_upper)
+            if v_item is None:
+                for k, v in v1_miss.items():
+                    if match_equipment_name(equip_upper, k):
+                        v_item = v
+                        break
+
+            if v_item is None:
+                merged_missing.append(m)
+                continue
+
+            verdict = v_item.get('agree', '').upper()
+            if verdict == 'NO':
+                metadata['engine_errors_excluded'] += 1
+                continue
+            else:
+                if v_item.get('comments'):
+                    m['Notes'] = (m['Notes'] + f' | Validator: {v_item["comments"][:100]}').strip(' | ')
+                merged_missing.append(m)
+
+    # ── Fold discoveries into Missing from BOQ ──
+    discoveries = []
+    if is_dual and comparison_result:
+        discoveries = comparison_result.get('discoveries', [])
+    elif not is_dual and validator_data_list:
+        discoveries = validator_data_list[0].get('discoveries', [])
+
+    # Find the highest trace ID number to continue the sequence
+    max_trace_num = 0
+    import re as _re
+    for comp in merged_comparisons + merged_missing:
+        tid = comp.get('Trace ID', '')
+        nums = _re.findall(r'(\d+)$', tid)
+        if nums:
+            max_trace_num = max(max_trace_num, int(nums[0]))
+
+    # Get trace ID prefix from existing items
+    trace_prefix = 'TQ'
+    for comp in engine_data['comparisons']:
+        tid = comp.get('Trace ID', '')
+        parts = tid.split('-')
+        if len(parts) >= 2:
+            trace_prefix = '-'.join(parts[:-1])
+            break
+
+    for disc in discoveries:
+        max_trace_num += 1
+        equip = disc.get('equipment', '')
+        qty = disc.get('count', 0)
+        try:
+            qty = float(qty) if qty is not None else 0
+        except (ValueError, TypeError):
+            qty = 0
+
+        # Try to find a unit rate
+        etype, label = _classify_description(equip)
+        unit_rate = UAE_UNIT_RATES.get(etype, 0) if etype else 0
+        est_exp = qty * unit_rate
+
+        location = disc.get('location', '')
+        reason = disc.get('reason_missed', '')
+        note_parts = []
+        if location:
+            note_parts.append(location)
+        if reason:
+            note_parts.append(reason)
+
+        merged_missing.append({
+            'Equipment': equip,
+            'Detection': 'Validator Discovery',
+            'Drawing Qty': qty,
+            'Trace ID': f'{trace_prefix}-{max_trace_num:03d}',
+            'Notes': ' | '.join(note_parts) if note_parts else 'Identified by validator during manual review.',
+            '_unit_rate': unit_rate,
+            '_est_exposure': est_exp,
+            '_equipment_type': etype or '',
+        })
+        metadata['discoveries_added'] += 1
+
+    return merged_comparisons, merged_missing, metadata
+
+
+def render_client_report_page():
+    """Render the Generate Client Report page."""
+
+    with st.sidebar:
+        st.markdown("### Client Report")
+        st.markdown("Generate the final client-facing report from engine output + validator responses.")
+
+        engine_report_file = st.file_uploader(
+            "Original Engine Report (XLSX)",
+            type=["xlsx"],
+            help="Upload the TraceQ BOQ Report XLSX downloaded from the Engine Analysis page.",
+            key="engine_report_upload",
+        )
+
+        validator_files_cr = st.file_uploader(
+            "Validator Submission(s)",
+            type=["xlsx"],
+            accept_multiple_files=True,
+            help="Upload the completed XLSX file(s) returned by your validators.",
+            key="validator_upload_cr",
+        )
+
+        job_id_cr = st.text_input("Job ID", value="TQ-JOB-001", help="Job identifier for the report.", key="job_id_cr")
+        client_name = st.text_input("Client Name (optional)", value="", help="Client name for report header.", key="client_name_cr")
+
+    # ── Main content ──
+    st.markdown("---")
+
+    # Guide
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown("### 1. Upload engine report")
+        st.markdown("Drag in the `TraceQ_BOQ_Report` XLSX from the Engine Analysis page.")
+    with col2:
+        st.markdown("### 2. Upload validator response(s)")
+        st.markdown("Drag in 1 or 2 completed validator XLSX files from the sidebar.")
+    with col3:
+        st.markdown("### 3. Download client report")
+        st.markdown("Review the preview, then generate and download the polished report.")
+
+    st.markdown("---")
+
+    if not engine_report_file:
+        st.info("Upload the original engine report XLSX in the sidebar to get started.")
+        return
+
+    if not validator_files_cr or len(validator_files_cr) == 0:
+        st.info("Upload at least one validator submission in the sidebar.")
+        return
+
+    if len(validator_files_cr) > 2:
+        st.warning("Maximum 2 validator files. Only the first 2 will be used.")
+        validator_files_cr = validator_files_cr[:2]
+
+    # ── Parse engine report ──
+    with st.spinner("Parsing engine report..."):
+        engine_bytes = engine_report_file.read()
+        engine_data = parse_engine_report(engine_bytes)
+
+    if not engine_data['comparisons'] and not engine_data['missing_from_boq']:
+        st.error("Could not parse the engine report. Please ensure this is a TraceQ BOQ Report XLSX from the Engine Analysis page.")
+        return
+
+    # ── Parse validator submissions ──
+    parsed_validators = []
+    for vf in validator_files_cr:
+        with st.spinner(f"Parsing {vf.name}..."):
+            vbytes = vf.read()
+            parsed = parse_validator_xlsx(vbytes, vf.name)
+            parsed_validators.append(parsed)
+
+    # ── Run comparison if dual ──
+    comparison_result = None
+    if len(parsed_validators) == 2:
+        comparison_result = compare_validators(parsed_validators[0], parsed_validators[1])
+
+    # ── Merge ──
+    with st.spinner("Merging validated data..."):
+        merged_comparisons, merged_missing, metadata = merge_validated_data(
+            engine_data, parsed_validators, comparison_result
+        )
+
+    # ── Preview stats ──
+    st.markdown("### Merge preview")
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("BOQ items (final)", len(merged_comparisons))
+    c2.metric("Engine errors excluded", metadata['engine_errors_excluded'])
+    c3.metric("Validator corrections", metadata['validator_corrections'])
+    c4.metric("Discoveries added", metadata['discoveries_added'])
+
+    if metadata['conservative_includes'] > 0:
+        st.caption(f"Conservative includes (validator disagreement): {metadata['conservative_includes']}")
+
+    st.caption(f"Validation: {metadata['validation_method']} — {', '.join(metadata['validator_names'])}")
+
+    # ── Expandable previews ──
+    with st.expander(f"BOQ comparison items ({len(merged_comparisons)} items)", expanded=False):
+        if merged_comparisons:
+            import pandas as pd
+            df = pd.DataFrame([{
+                'Equipment': c['Equipment'],
+                'BOQ Qty': c.get('_boq_qty', ''),
+                'Verified Qty': c.get('Drawing Qty', ''),
+                'Status': c.get('Risk', ''),
+                'Confidence': c.get('_confidence', ''),
+            } for c in merged_comparisons])
+            st.dataframe(df, use_container_width=True, hide_index=True)
+
+    with st.expander(f"Missing from BOQ ({len(merged_missing)} items)", expanded=False):
+        if merged_missing:
+            import pandas as pd
+            df = pd.DataFrame([{
+                'Equipment': m['Equipment'],
+                'Qty': m.get('Drawing Qty', ''),
+                'Source': m.get('Detection', ''),
+                'Trace ID': m.get('Trace ID', ''),
+            } for m in merged_missing])
+            st.dataframe(df, use_container_width=True, hide_index=True)
+
+    excluded_count = metadata['engine_errors_excluded']
+    if excluded_count > 0:
+        with st.expander(f"Excluded items — engine errors ({excluded_count})", expanded=False):
+            st.markdown("These items were removed because validator(s) confirmed the engine count was incorrect.")
+
+    # ── Generate button ──
+    st.markdown("---")
+    if st.button("Generate Client Report", type="primary"):
+        with st.spinner("Generating polished client report..."):
+            # Add validation metadata to comparisons for report
+            drawing_name = engine_data.get('drawing_name', 'Unknown')
+            boq_name = engine_data.get('boq_name', 'Unknown')
+
+            # Call the existing report generator with merged data
+            report_bytes = generate_excel_report(
+                comparisons=merged_comparisons,
+                missing_from_boq=merged_missing,
+                boq_items=[],  # Not needed for the report output
+                drawing_name=drawing_name,
+                boq_name=boq_name,
+            )
+
+            st.success(f"Client report generated! {len(merged_comparisons)} BOQ items, {len(merged_missing)} missing items.")
+
+            safe_job_id = job_id_cr.replace(' ', '_') if job_id_cr else 'report'
+            st.download_button(
+                label="Download Client Report",
+                data=report_bytes,
+                file_name=f"TraceQ_Client_Report_{safe_job_id}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.xml",
+            )
+
+
 def render_validator_page():
     """Render the Upload Validator Response page."""
 
@@ -1882,6 +2515,9 @@ def render_validator_page():
 
 if page == "Upload Validator Response":
     render_validator_page()
+
+elif page == "Generate Client Report":
+    render_client_report_page()
 
 else:
     # ─── ENGINE ANALYSIS PAGE (original) ─────────────────────────────────────
