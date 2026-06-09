@@ -28,39 +28,112 @@ from traceq_engine import TraceQEngine, Config, QuickScanResult, FileConverter
 # ─── BOQ Keyword Map ──────────────────────────────────────────────────────────
 # Mapping: keywords in BOQ descriptions → engine equipment types
 # Order matters — more specific matches first
+# Tier 1 Synonym Library: mined from S1-S6 BOQ descriptions (May 25, 2026)
+# 35 original keywords → 80+ to cover real-world BOQ description variations
 BOQ_KEYWORD_MAP = [
+    # === FCU variants (most specific first) ===
     ('FCU-1', 'fcu', 'FCU-1 Ducted'),
     ('FCU-2', 'fcu', 'FCU-2 Ducted'),
     ('FCU-3', 'fcu', 'FCU-3 Ducted'),
     ('FCU-4', 'fcu', 'FCU-4'),
     ('FCU', 'fcu', 'FCU (General)'),
     ('FAN COIL', 'fcu', 'Fan Coil Unit'),
+
+    # === Thermostat ===
     ('THERMOSTAT', 'thermostat', 'Thermostat'),
-    ('SUPPLY AIR DIFFUSER', 'supply_diffuser', 'Supply Air Diffuser'),
-    ('RETURN AIR DIFFUSER', 'return_diffuser', 'Return Air Diffuser'),
+
+    # === Flow bar / linear slot diffusers (BEFORE general diffusers) ===
     ('SUPPLY AIR FLOW BAR', 'flow_bar', 'Supply Air Flow Bar'),
     ('RETURN AIR FLOW BAR', 'flow_bar', 'Return Air Flow Bar'),
     ('FLOW BAR', 'flow_bar', 'Flow Bar'),
+    ('SALD', 'flow_bar', 'Supply Air Linear Diffuser'),              # S1 BOQ abbreviation
+    ('RALD', 'flow_bar', 'Return Air Linear Diffuser'),              # S1 BOQ abbreviation
+    ('LENIAR SLOT DIFFUSER', 'flow_bar', 'Linear Slot Diffuser'),   # S3 typo variant
+    ('LINEAR SLOT DIFFUSER', 'flow_bar', 'Linear Slot Diffuser'),   # S1
+    ('SLOT DIFFUSER', 'flow_bar', 'Slot Diffuser'),                 # S2/S3 catch-all
+
+    # === Diffusers — supply / return / extract ===
+    ('SUPPLY AIR DIFFUSER', 'supply_diffuser', 'Supply Air Diffuser'),
+    ('RETURN AIR DIFFUSER', 'return_diffuser', 'Return Air Diffuser'),
+    ('EXTRACT DIFFUSER', 'extract_diffuser', 'Extract Diffuser'),
+    ('EXHAUST SQUARE DIFFUSER', 'extract_diffuser', 'Exhaust Diffuser'),  # S1
+    ('EXHAUST AIR DIFFUSER', 'extract_diffuser', 'Exhaust Air Diffuser'), # S2
+    ('EXHAUST DIFFUSER', 'extract_diffuser', 'Exhaust Diffuser'),
+    ('DECORATIVE DIFFUSER', 'supply_diffuser', 'Decorative Diffuser'),    # S1
+    ('SQUARE DIFFUSER', 'supply_diffuser', 'Square Diffuser'),            # S1
+    ('CIRCULAR DIFFUSER', 'supply_diffuser', 'Circular Diffuser'),        # S4
+    ('DISK VALVE', 'extract_diffuser', 'Disk Valve'),                     # S3
+    ('DISC VALVE', 'extract_diffuser', 'Disc Valve'),                     # S2/S3
+
+    # === Plenum box ===
     ('PLENUM BOX', 'plenum_box', 'Plenum Box'),
+
+    # === Dampers (most specific first) ===
     ('SUPPLY AIR VOLUME DAMPER', 'volume_control_damper', 'Supply Air Volume Damper'),
+    ('VOLUME CONTROL DAMPER', 'volume_control_damper', 'Volume Control Damper'),
     ('VOLUME DAMPER', 'volume_control_damper', 'Volume Control Damper'),
     ('VCD', 'volume_control_damper', 'VCD'),
+    ('SMOKE FIRE DAMPER', 'fire_damper', 'Smoke Fire Damper'),            # S2/S3
     ('FIRE DAMPER', 'fire_damper', 'Fire Damper'),
     ('MOTORIZED DAMPER', 'motorized_damper', 'Motorized Damper'),
+    ('MOTORIZE DAMPER', 'motorized_damper', 'Motorize Damper'),           # S1 variant (no D)
+    ('SMOKE DAMPER', 'fire_damper', 'Smoke Damper'),
+    ('NON-RETURN DAMPER', 'non_return_damper', 'Non-Return Damper'),      # Hyphenated (S1)
     ('NON RETURN DAMPER', 'non_return_damper', 'Non-Return Damper'),
+    ('BACK DRAFT DAMPER', 'non_return_damper', 'Backdraft Damper'),       # S2/S3
+
+    # === Sound attenuator ===
     ('SOUND ATTENUATOR', 'sound_attenuator', 'Sound Attenuator'),
+    ('ACOUSTIC', 'sound_attenuator', 'Acoustic Attenuator'),             # S1 "Acoustic linear"
+
+    # === Ducts ===
     ('SUPPLY AIR DUCT', 'supply_duct', 'Supply Air Duct'),
     ('RETURN AIR DUCT', 'return_duct', 'Return Air Duct'),
     ('FLEXIBLE DUCT', 'flexible_duct', 'Flexible Duct'),
+
+    # === VRF/VRV system — specific model patterns first, then units, then general ===
+    ('VRV-IDU', 'indoor_unit', 'VRV Indoor Unit'),                       # S1 individual units
+    ('DX-IDU', 'indoor_unit', 'DX Indoor Unit'),                         # S1 DX splits
+    ('VRV-ODU', 'outdoor_unit', 'VRV Outdoor Unit'),                     # S1
+    ('VRV-AHU', 'fahu', 'VRV-AHU Unit'),                                 # S1
+    ('OUTDOOR UNIT', 'outdoor_unit', 'Outdoor Unit'),                    # BEFORE VRV/VRF (S5/S6)
+    ('INDOOR UNIT', 'indoor_unit', 'Indoor Unit'),                       # BEFORE VRV/VRF
     ('VRV', 'vrf', 'VRV/VRF Unit'),
     ('VRF', 'vrf', 'VRF Unit'),
-    ('OUTDOOR UNIT', 'outdoor_unit', 'Outdoor Unit'),
-    ('INDOOR UNIT', 'indoor_unit', 'Indoor Unit'),
+    ('DUCTED SPLIT', 'indoor_unit', 'Ducted Split Unit'),                # S2/S3
+    ('DECORATIVE SPLIT', 'indoor_unit', 'Decorative Split Unit'),        # S3
     ('WALL MOUNTED', 'indoor_unit', 'Wall Mounted Unit'),
+
+    # === AHU / FAHU ===
+    ('FRESH AIR HANDLING', 'fahu', 'Fresh Air Handling Unit'),            # S2
+    ('FAHU', 'fahu', 'FAHU'),
+    ('AIR HANDLING UNIT', 'air_handling_unit', 'Air Handling Unit'),      # S3
+    ('AHU', 'air_handling_unit', 'AHU'),
+
+    # === Grilles & Louvers ===
+    ('LINEAR BAR GRILLE', 'grille', 'Linear Bar Grille'),                # S1
+    ('SLBG', 'grille', 'Supply Linear Bar Grille'),                      # S1 BOQ abbreviation
     ('GRILLE', 'grille', 'Grille'),
+    ('SAND TRAP LOUVER', 'louver', 'Sand Trap Louver'),                  # S2/S3
+    ('TRAP LOUVER', 'louver', 'Trap Louver'),                            # S1
+    ('LOUVER', 'louver', 'Louver'),
+    ('LOUVRE', 'louver', 'Louvre'),                                       # British spelling
+
+    # === Fans ===
     ('EXHAUST FAN', 'exhaust_fan', 'Exhaust Fan'),
+    ('EXTRACT FAN', 'exhaust_fan', 'Extract Fan'),                       # S2/S3
     ('VENTILATION FAN', 'exhaust_fan', 'Ventilation Fan'),
+    ('SMOKE EXTRACT FAN', 'exhaust_fan', 'Smoke Extract Fan'),           # S2
+    ('INLINE FAN', 'exhaust_fan', 'Inline Fan'),
+    ('EAF-', 'exhaust_fan', 'Exhaust Air Fan'),                          # S1 EAF-01 etc
+    ('FAF-', 'exhaust_fan', 'Fresh Air Fan'),                            # S1 FAF-04 etc
+
+    # === Air curtain ===
+    ('AIR CURTAIN', 'air_curtain', 'Air Curtain'),
+
+    # === Miscellaneous ===
     ('ACCESS DOOR', 'access_door', 'Access Door'),
+    ('CONDENSATE DRAIN', 'drain_pipe', 'Condensate Drain'),              # S3
     ('DRAIN', 'drain_pipe', 'Drain Pipe'),
     ('INSULATION', 'insulation', 'Insulation'),
 ]
@@ -153,6 +226,41 @@ def _classify_description(desc_text):
         if keyword in upper:
             return etype, label
     return None, desc_text
+
+
+
+def boq_coverage_check(boq_items):
+    """
+    BOQ Coverage Check (pre-flight).
+    Cross-references every BOQ line item against the keyword map classification.
+    Returns (classified, unclassified) — lists of dicts with item info.
+    Tier 1 pre-flight: flags items that can\'t be matched to any equipment type
+    so the user knows BEFORE the report generates what fell through.
+    """
+    classified = []
+    unclassified = []
+
+    for item in boq_items:
+        desc = item.get('description', '')
+        etype = item.get('equipment_type')
+        label = item.get('equipment_label', '')
+        qty = item.get('qty', 0)
+
+        entry = {
+            'description': desc[:80] + ('...' if len(desc) > 80 else ''),
+            'full_description': desc,
+            'qty': qty,
+            'unit': item.get('unit', ''),
+            'equipment_type': etype,
+            'equipment_label': label,
+        }
+
+        if etype is not None:
+            classified.append(entry)
+        else:
+            unclassified.append(entry)
+
+    return classified, unclassified
 
 
 def parse_boq(file_bytes, filename):
@@ -2925,6 +3033,46 @@ else:
                     boq_items = parse_boq(boq_bytes, boq_file.name)
 
                     if boq_items:
+                        # ── BOQ Coverage Check (Tier 1 pre-flight) ──
+                        classified, unclassified = boq_coverage_check(boq_items)
+                        coverage_pct = len(classified) / len(boq_items) * 100 if boq_items else 0
+
+                        with st.expander(
+                            f"🔍 BOQ Coverage Check — {len(classified)}/{len(boq_items)} items classified ({coverage_pct:.0f}%)",
+                            expanded=len(unclassified) > 0
+                        ):
+                            if unclassified:
+                                st.warning(
+                                    f"**{len(unclassified)} BOQ line item(s) could not be classified** and will be "
+                                    f"excluded from the comparison. These items have no matching equipment type in "
+                                    f"the synonym library."
+                                )
+                                import pandas as pd
+                                uncl_df = pd.DataFrame([
+                                    {
+                                        'Description': u['description'],
+                                        'Qty': u['qty'],
+                                        'Unit': u['unit'],
+                                    }
+                                    for u in unclassified
+                                ])
+                                st.dataframe(uncl_df, use_container_width=True, hide_index=True)
+                                st.caption(
+                                    "These items may need manual review or a Tier 2 RFI. "
+                                    "Future engine updates will expand the synonym library to cover more description patterns."
+                                )
+                            else:
+                                st.success("All BOQ line items classified successfully. Full coverage achieved.")
+
+                            if classified:
+                                # Show classification summary
+                                from collections import Counter
+                                type_counts = Counter(c['equipment_type'] for c in classified)
+                                st.caption(
+                                    f"Classified into {len(type_counts)} equipment types: "
+                                    + ", ".join(f"{_format_equipment_name(t)} ({n})" for t, n in type_counts.most_common())
+                                )
+
                         comparisons, missing_from_boq = compare_boq_vs_drawing(boq_items, merged)
 
                         # ── Summary Metrics ──
