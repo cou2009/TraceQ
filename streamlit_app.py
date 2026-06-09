@@ -1,8 +1,8 @@
 """
-TraceQ — BOQ Risk Review Engine
+TraceQ â BOQ Risk Review Engine
 ================================
 Streamlit web app for HVAC drawing analysis.
-Upload a DXF/DWG drawing + BOQ spreadsheet → get a risk report.
+Upload a DXF/DWG drawing + BOQ spreadsheet â get a risk report.
 
 Built by TechTelligence | nicholas@ttelligence.com
 """
@@ -23,13 +23,13 @@ from openpyxl.utils import get_column_letter
 from traceq_engine import TraceQEngine, Config, QuickScanResult, FileConverter
 
 
-# ─── BOQ Parser ───────────────────────────────────────────────────────────────
+# âââ BOQ Parser âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
-# ─── BOQ Keyword Map ──────────────────────────────────────────────────────────
-# Mapping: keywords in BOQ descriptions → engine equipment types
-# Order matters — more specific matches first
+# âââ BOQ Keyword Map ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+# Mapping: keywords in BOQ descriptions â engine equipment types
+# Order matters â more specific matches first
 # Tier 1 Synonym Library: mined from S1-S6 BOQ descriptions (May 25, 2026)
-# 35 original keywords → 80+ to cover real-world BOQ description variations
+# 35 original keywords â 80+ to cover real-world BOQ description variations
 BOQ_KEYWORD_MAP = [
     # === FCU variants (most specific first) ===
     ('FCU-1', 'fcu', 'FCU-1 Ducted'),
@@ -52,7 +52,7 @@ BOQ_KEYWORD_MAP = [
     ('LINEAR SLOT DIFFUSER', 'flow_bar', 'Linear Slot Diffuser'),   # S1
     ('SLOT DIFFUSER', 'flow_bar', 'Slot Diffuser'),                 # S2/S3 catch-all
 
-    # === Diffusers — supply / return / extract ===
+    # === Diffusers â supply / return / extract ===
     ('SUPPLY AIR DIFFUSER', 'supply_diffuser', 'Supply Air Diffuser'),
     ('RETURN AIR DIFFUSER', 'return_diffuser', 'Return Air Diffuser'),
     ('EXTRACT DIFFUSER', 'extract_diffuser', 'Extract Diffuser'),
@@ -91,7 +91,7 @@ BOQ_KEYWORD_MAP = [
     ('RETURN AIR DUCT', 'return_duct', 'Return Air Duct'),
     ('FLEXIBLE DUCT', 'flexible_duct', 'Flexible Duct'),
 
-    # === VRF/VRV system — specific model patterns first, then units, then general ===
+    # === VRF/VRV system â specific model patterns first, then units, then general ===
     ('VRV-IDU', 'indoor_unit', 'VRV Indoor Unit'),                       # S1 individual units
     ('DX-IDU', 'indoor_unit', 'DX Indoor Unit'),                         # S1 DX splits
     ('VRV-ODU', 'outdoor_unit', 'VRV Outdoor Unit'),                     # S1
@@ -141,7 +141,7 @@ BOQ_KEYWORD_MAP = [
 # Units that can be compared directly (countable items)
 COUNTABLE_UNITS = {'nos.', 'nos', 'no.', 'no', 'pcs', 'pcs.', 'ea', 'ea.', 'each', 'set', 'sets'}
 
-# Trace ID prefix map: equipment_type → category prefix for TQ-[CAT]-[NNN] format
+# Trace ID prefix map: equipment_type â category prefix for TQ-[CAT]-[NNN] format
 TRACE_PREFIX_MAP = {
     'supply_duct': 'DUCT', 'return_duct': 'DUCT', 'exhaust_duct': 'DUCT',
     'volume_control_damper': 'VCD', 'fcu': 'FCU',
@@ -164,8 +164,8 @@ UAE_UNIT_RATES = {
     'sound_attenuator': 600, 'exhaust_fan': 3500, 'flexible_duct': 85,
 }
 
-# Expected detection method per equipment type — used in Trace ID reference
-# when engine didn't detect the item (source = '—')
+# Expected detection method per equipment type â used in Trace ID reference
+# when engine didn't detect the item (source = 'â')
 EXPECTED_DETECTION_METHOD = {
     'supply_duct': 'Layer Detection', 'return_duct': 'Layer Detection', 'exhaust_duct': 'Layer Detection',
     'volume_control_damper': 'Layer Detection', 'fcu': 'Block Detection',
@@ -233,7 +233,7 @@ def boq_coverage_check(boq_items):
     """
     BOQ Coverage Check (pre-flight).
     Cross-references every BOQ line item against the keyword map classification.
-    Returns (classified, unclassified) — lists of dicts with item info.
+    Returns (classified, unclassified) â lists of dicts with item info.
     Tier 1 pre-flight: flags items that can\'t be matched to any equipment type
     so the user knows BEFORE the report generates what fell through.
     """
@@ -377,7 +377,7 @@ def compare_boq_vs_drawing(boq_items, drawing_merged):
         if item.get('unit'):
             boq_by_type[etype]['units'].add(item['unit'].strip().lower())
 
-    # Build comparison for each BOQ equipment type — IN BOQ ORDER
+    # Build comparison for each BOQ equipment type â IN BOQ ORDER
     matched_drawing_types = set()
 
     for etype in boq_type_order:
@@ -387,7 +387,7 @@ def compare_boq_vs_drawing(boq_items, drawing_merged):
 
         boq_qty = boq_data['total_qty']
         drawing_qty = drawing_data.get('count', 0)
-        source = drawing_data.get('source', '—')
+        source = drawing_data.get('source', 'â')
         rates = boq_data['rates']
         avg_rate = sum(rates) / len(rates) if rates else UAE_UNIT_RATES.get(etype, 0)
         units = boq_data['units']
@@ -397,9 +397,9 @@ def compare_boq_vs_drawing(boq_items, drawing_merged):
         diff = drawing_qty - boq_qty
         exposure = abs(diff) * avg_rate if avg_rate and diff != 0 else 0
 
-        # Determine status — ONLY MATCH or DISCREPANCY (no risk levels)
+        # Determine status â ONLY MATCH or DISCREPANCY (no risk levels)
         # 0% tolerance: only exact match (diff == 0 AND drawing actually detected) = MATCH
-        # If drawing_qty == 0 and boq_qty > 0, that's NOT a match — it's not detected
+        # If drawing_qty == 0 and boq_qty > 0, that's NOT a match â it's not detected
         is_unit_mismatch = has_non_countable
         if diff == 0 and drawing_qty > 0 and not is_unit_mismatch:
             status = 'MATCH'
@@ -418,24 +418,24 @@ def compare_boq_vs_drawing(boq_items, drawing_merged):
         source_label = _format_source_label(source)
         trace_id = _make_trace_id(etype)
 
-        # Always show drawing qty — even for unit mismatches, show entity count
+        # Always show drawing qty â even for unit mismatches, show entity count
         if drawing_qty > 0:
             if is_unit_mismatch:
                 show_drawing_qty = f"{int(drawing_qty)} entities"
             else:
                 show_drawing_qty = int(drawing_qty)
-            show_diff = f"{int(diff):+d}" if not is_unit_mismatch else '—'
-            variance_pct = f"{abs(diff) / max(boq_qty, 1) * 100:.0f}%" if not is_unit_mismatch and boq_qty > 0 else '—'
+            show_diff = f"{int(diff):+d}" if not is_unit_mismatch else 'â'
+            variance_pct = f"{abs(diff) / max(boq_qty, 1) * 100:.0f}%" if not is_unit_mismatch and boq_qty > 0 else 'â'
         else:
             show_drawing_qty = 'Not Detected'
-            show_diff = '—'
-            variance_pct = '—'
+            show_diff = 'â'
+            variance_pct = 'â'
 
-        # Only show exposure for DISCREPANCY items (0% tolerance — exact match only)
+        # Only show exposure for DISCREPANCY items (0% tolerance â exact match only)
         if status == 'DISCREPANCY' and exposure > 0 and not is_unit_mismatch:
             show_exposure = f"{exposure:,.0f}"
         else:
-            show_exposure = '—'
+            show_exposure = 'â'
             if status == 'MATCH':
                 exposure = 0  # zero out exposure for match items
 
@@ -446,7 +446,7 @@ def compare_boq_vs_drawing(boq_items, drawing_merged):
             'Drawing Qty': show_drawing_qty,
             'Difference': show_diff,
             'Variance %': variance_pct,
-            'Unit': ', '.join(sorted(units)) if units else '—',
+            'Unit': ', '.join(sorted(units)) if units else 'â',
             'Risk': status,  # field name kept for backwards compat; values are MATCH/DISCREPANCY only
             'Exposure (AED)': show_exposure,
             'Notes': note,
@@ -502,8 +502,8 @@ def _format_equipment_name(etype):
 
 def _format_source_label(source):
     """Convert raw engine source to clean label."""
-    if not source or source == '—':
-        return '—'
+    if not source or source == 'â':
+        return 'â'
     if 'tier1' in source:
         return 'Layer Detection'
     elif 'tier2' in source:
@@ -538,9 +538,9 @@ def _build_discrepancy_note(etype, boq_data, drawing_data, diff):
         source_label = source
 
     if diff > 0:
-        note = f"Drawing shows {int(drawing_qty)} via {source_label} — {abs(int(diff))} more than BOQ ({int(boq_qty)})."
+        note = f"Drawing shows {int(drawing_qty)} via {source_label} â {abs(int(diff))} more than BOQ ({int(boq_qty)})."
     else:
-        note = f"Drawing shows {int(drawing_qty)} via {source_label} — {abs(int(diff))} fewer than BOQ ({int(boq_qty)})."
+        note = f"Drawing shows {int(drawing_qty)} via {source_label} â {abs(int(diff))} fewer than BOQ ({int(boq_qty)})."
 
     if len(boq_data['items']) > 1:
         sub_parts = []
@@ -550,13 +550,13 @@ def _build_discrepancy_note(etype, boq_data, drawing_data, diff):
         note += f" BOQ breakdown: {', '.join(sub_parts)}."
 
     if etype == 'return_diffuser' and diff > 0:
-        note += " Note: block detection may double-count *U16/*U17 inserts — verify against drawing legend."
+        note += " Note: block detection may double-count *U16/*U17 inserts â verify against drawing legend."
     elif etype == 'vrf' and diff < 0:
-        note += " Note: drawing detects unique VRF labels only — BOQ may list individual modules per system."
+        note += " Note: drawing detects unique VRF labels only â BOQ may list individual modules per system."
     elif etype == 'flow_bar' and diff < 0:
-        note += " Note: flow bars often lack distinct block markers — text detection may undercount."
+        note += " Note: flow bars often lack distinct block markers â text detection may undercount."
     elif etype == 'volume_control_damper' and len(boq_data['items']) > 1:
-        note += " Note: BOQ may list different damper sizes separately — verify each size against drawing."
+        note += " Note: BOQ may list different damper sizes separately â verify each size against drawing."
 
     return note
 
@@ -575,39 +575,39 @@ def _build_unit_mismatch_note(etype, boq_data, drawing_data, units):
         base = f"BOQ = {boq_qty:,.1f} {unit_list}. Not detected in drawing."
 
     if any(u.strip('.') in ('sqm', 'sq.m', 'sq m', 'm2', 'sqft') for u in units):
-        base += " BOQ measured in area — duct schedule comparison recommended."
+        base += " BOQ measured in area â duct schedule comparison recommended."
     elif any(u.strip('.') in ('mtrs', 'mtr', 'm', 'lm', 'rm') for u in units):
-        base += " BOQ measured in length — direct entity comparison not possible."
+        base += " BOQ measured in length â direct entity comparison not possible."
 
     return base
 
 
 def _build_verify_note(etype, boq_data, units):
-    """Legacy function — kept for backwards compatibility."""
+    """Legacy function â kept for backwards compatibility."""
     return _build_unit_mismatch_note(etype, boq_data, {}, units)
 
 
-# ─── Excel Report Generator ──────────────────────────────────────────────────
+# âââ Excel Report Generator ââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def _xl_val(v):
-    """Return '—' string for None values in Excel cells."""
-    return '—' if v is None else v
+    """Return 'â' string for None values in Excel cells."""
+    return 'â' if v is None else v
 
 
 def generate_validator_template(comparisons, missing_from_boq, merged, drawing_name, scan=None):
     """
     Generate a 4-tab validator XLSX for QS verification.
-    Tab 1: Instructions — what to do, time budget, rules
-    Tab 2: BOQ Comparison — engine output (locked) + Agree? (Yes/No/Partial) + Comments
-    Tab 3: Missing from BOQ — engine findings + Agree? + Comments
-    Tab 4: Validator Discoveries — blank rows for items the QS finds that engine missed
+    Tab 1: Instructions â what to do, time budget, rules
+    Tab 2: BOQ Comparison â engine output (locked) + Agree? (Yes/No/Partial) + Comments
+    Tab 3: Missing from BOQ â engine findings + Agree? + Comments
+    Tab 4: Validator Discoveries â blank rows for items the QS finds that engine missed
     Returns bytes of the .xlsx file.
     """
     from openpyxl.worksheet.datavalidation import DataValidation
 
     wb = openpyxl.Workbook()
 
-    # ── Shared styles ──
+    # ââ Shared styles ââ
     header_font = Font(name='Arial', bold=True, size=11, color='FFFFFF')
     header_fill = PatternFill('solid', fgColor='2C3E50')
     section_font = Font(name='Arial', bold=True, size=10, color='8B0000')
@@ -657,7 +657,7 @@ def generate_validator_template(comparisons, missing_from_boq, merged, drawing_n
             ws.cell(row=row, column=c).fill = section_fill
             ws.cell(row=row, column=c).border = thin_border
 
-    # ═══ TAB 1: INSTRUCTIONS ═══
+    # âââ TAB 1: INSTRUCTIONS âââ
     ws1 = wb.active
     ws1.title = 'Instructions'
     ws1.sheet_properties.tabColor = '2C3E50'
@@ -699,7 +699,7 @@ def generate_validator_template(comparisons, missing_from_boq, merged, drawing_n
         if font:
             cell.font = font
 
-    # ═══ TAB 2: BOQ COMPARISON ═══
+    # âââ TAB 2: BOQ COMPARISON âââ
     ws2 = wb.create_sheet('BOQ Comparison')
     ws2.sheet_properties.tabColor = '27AE60'
 
@@ -723,7 +723,7 @@ def generate_validator_template(comparisons, missing_from_boq, merged, drawing_n
         # Calculate variance
         if is_unit_mismatch:
             variance = 'Unit mismatch'
-        elif dwg_qty in (None, '—', 0, '') or dwg_qty == 0:
+        elif dwg_qty in (None, 'â', 0, '') or dwg_qty == 0:
             variance = 'NOT DETECTED'
         else:
             try:
@@ -731,7 +731,7 @@ def generate_validator_template(comparisons, missing_from_boq, merged, drawing_n
                 pct = diff / max(float(boq_qty), 1) * 100
                 variance = f'{diff:+.0f} ({pct:+.1f}%)'
             except (ValueError, TypeError):
-                variance = '—'
+                variance = 'â'
 
         ws2.cell(row=row, column=1, value=i)
         ws2.cell(row=row, column=2, value=equip)
@@ -757,7 +757,7 @@ def generate_validator_template(comparisons, missing_from_boq, merged, drawing_n
     for col, w in enumerate(widths2, 1):
         ws2.column_dimensions[get_column_letter(col)].width = w
 
-    # ═══ TAB 3: MISSING FROM BOQ ═══
+    # âââ TAB 3: MISSING FROM BOQ âââ
     ws3 = wb.create_sheet('Missing from BOQ')
     ws3.sheet_properties.tabColor = 'E74C3C'
 
@@ -802,7 +802,7 @@ def generate_validator_template(comparisons, missing_from_boq, merged, drawing_n
     for col, w in enumerate(widths3, 1):
         ws3.column_dimensions[get_column_letter(col)].width = w
 
-    # ═══ TAB 4: VALIDATOR DISCOVERIES ═══
+    # âââ TAB 4: VALIDATOR DISCOVERIES âââ
     ws4 = wb.create_sheet('Validator Discoveries')
     ws4.sheet_properties.tabColor = '8E44AD'
 
@@ -843,7 +843,7 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
     """
     wb = openpyxl.Workbook()
 
-    # ═══ STYLES (per Format Spec) ═══════════════════════════════════════════
+    # âââ STYLES (per Format Spec) âââââââââââââââââââââââââââââââââââââââââââ
     navy = '002060'
     dark_blue = '1F4E79'
     col_header_blue = '4472C4'
@@ -913,7 +913,7 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
     missing_exposure = sum(m.get('_est_exposure', 0) or 0 for m in missing_from_boq)
     total_exposure = comparison_exposure + missing_exposure
 
-    # ═══ TAB 1: EXECUTIVE SUMMARY ═══════════════════════════════════════════
+    # âââ TAB 1: EXECUTIVE SUMMARY âââââââââââââââââââââââââââââââââââââââââââ
     ws1 = wb.active
     ws1.title = "Executive Summary"
     ws1.sheet_properties.tabColor = navy
@@ -921,7 +921,7 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
     # Navy banner
     ws1.merge_cells('A1:F2')
     c = ws1['A1']
-    c.value = 'TraceQ — HVAC BOQ Risk Analysis'
+    c.value = 'TraceQ â HVAC BOQ Risk Analysis'
     c.font = banner_font
     c.fill = navy_fill
     c.alignment = Alignment(horizontal='center', vertical='center')
@@ -951,7 +951,7 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
         ws1.cell(row=row, column=2, value=val).font = normal_font
         row += 1
 
-    # ── Stats Bar ──
+    # ââ Stats Bar ââ
     row += 1
     stats_headers = ['Total Items Reviewed', 'Matched', 'Discrepancies', 'Missing from BOQ', 'Total Est. Exposure (AED)']
     stats_values = [total_items, matches, discrepancies, missing_count, total_exposure]
@@ -972,7 +972,7 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
             c.number_format = '#,##0'
     row += 2
 
-    # ── Top Findings ──
+    # ââ Top Findings ââ
     c = ws1.cell(row=row, column=1, value='KEY FINDINGS')
     c.font = Font(name='Arial', bold=True, size=11, color=navy)
     for ci in range(1, 7):
@@ -1022,7 +1022,7 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
         _apply_border_row(ws1, row, 3)
         row += 1
 
-    # ── Total Estimated Financial Exposure ──
+    # ââ Total Estimated Financial Exposure ââ
     row += 1
     ws1.cell(row=row, column=1, value='TOTAL ESTIMATED FINANCIAL EXPOSURE').font = bold_font_big
     row += 1
@@ -1032,7 +1032,7 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
     breakdown = f'Discrepancies: AED {comparison_exposure:,.0f}  |  Missing items: AED {missing_exposure:,.0f}'
     ws1.cell(row=row, column=1, value=breakdown).font = normal_font
     row += 1
-    ws1.cell(row=row, column=1, value='Estimated based on typical UAE HVAC market rates — indicative only.').font = disclaimer_font
+    ws1.cell(row=row, column=1, value='Estimated based on typical UAE HVAC market rates â indicative only.').font = disclaimer_font
 
     ws1.column_dimensions['A'].width = 30
     ws1.column_dimensions['B'].width = 22
@@ -1041,14 +1041,14 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
     ws1.column_dimensions['E'].width = 22
     ws1.column_dimensions['F'].width = 14
 
-    # ═══ TAB 2: BOQ COMPARISON ══════════════════════════════════════════════
+    # âââ TAB 2: BOQ COMPARISON ââââââââââââââââââââââââââââââââââââââââââââââ
     ws2 = wb.create_sheet("BOQ Comparison")
     ws2.sheet_properties.tabColor = col_header_blue
 
     # Banner
     ws2.merge_cells('A1:K1')
     c = ws2['A1']
-    c.value = 'BOQ vs Drawing — Detailed Comparison'
+    c.value = 'BOQ vs Drawing â Detailed Comparison'
     c.font = banner_font
     c.fill = navy_fill
     c.alignment = Alignment(horizontal='center', vertical='center')
@@ -1065,7 +1065,7 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
 
     # BOQ order + tolerance note
     ws2.merge_cells('A3:K3')
-    ws2.cell(row=3, column=1, value='Items listed in BOQ order as received from contractor. 0% tolerance — any quantity mismatch is flagged as DISCREPANCY.').font = Font(name='Arial', size=9, italic=True, color='888888')
+    ws2.cell(row=3, column=1, value='Items listed in BOQ order as received from contractor. 0% tolerance â any quantity mismatch is flagged as DISCREPANCY.').font = Font(name='Arial', size=9, italic=True, color='888888')
 
     # Column headers per format spec
     headers2 = [
@@ -1083,7 +1083,7 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
     ws2.row_dimensions[row].height = 35
     row += 1
 
-    # Data rows — in BOQ order
+    # Data rows â in BOQ order
     item_no = 0
     for idx, comp in enumerate(comparisons):
         item_no += 1
@@ -1091,9 +1091,9 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
         is_alt = (idx % 2 == 1)
 
         boq_val = comp.get('_boq_qty', 0)
-        dwg_val = comp.get('Drawing Qty', '—')
-        diff_val = comp.get('Difference', '—')
-        var_pct = comp.get('Variance %', '—')
+        dwg_val = comp.get('Drawing Qty', 'â')
+        diff_val = comp.get('Difference', 'â')
+        var_pct = comp.get('Variance %', 'â')
         exp_val = comp.get('_exposure_num', 0) or 0
 
         vals = [
@@ -1104,7 +1104,7 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
             dwg_val,
             diff_val,
             var_pct,
-            exp_val if exp_val > 0 else '—',
+            exp_val if exp_val > 0 else 'â',
             status,
             comp['Trace ID'],
             comp['Notes'],
@@ -1147,7 +1147,7 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
                 c.font = aed_font
         row += 1
 
-    # ── AED Totals Row ──
+    # ââ AED Totals Row ââ
     row += 1
     ws2.cell(row=row, column=7, value='TOTAL:').font = bold_font_big
     ws2.cell(row=row, column=7).alignment = Alignment(horizontal='right')
@@ -1158,7 +1158,7 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
     c.border = thin_border
     _apply_border_row(ws2, row, 11)
 
-    # ── Trace ID Reference Section ──
+    # ââ Trace ID Reference Section ââ
     row += 2
     ws2.cell(row=row, column=1, value='TRACE ID REFERENCE').font = Font(name='Arial', bold=True, size=11, color=navy)
     for ci in range(1, 12):
@@ -1184,10 +1184,10 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
             continue
         seen_prefixes.add(prefix)
         etype = comp.get('_equipment_type', '')
-        source_label = comp.get('Detection Source', '—')
+        source_label = comp.get('Detection Source', 'â')
         # Fallback to expected detection method from config when engine didn't detect
-        if source_label in ('—', '', None):
-            source_label = EXPECTED_DETECTION_METHOD.get(etype, '—')
+        if source_label in ('â', '', None):
+            source_label = EXPECTED_DETECTION_METHOD.get(etype, 'â')
 
         ws2.cell(row=row, column=1, value=f'{prefix}-*').font = trace_font
         ws2.cell(row=row, column=2, value=comp['Equipment']).font = normal_font
@@ -1202,14 +1202,14 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
     for i, w in enumerate(tab2_widths):
         ws2.column_dimensions[get_column_letter(i + 1)].width = w
 
-    # ═══ TAB 3: MISSING FROM BOQ ════════════════════════════════════════════
+    # âââ TAB 3: MISSING FROM BOQ ââââââââââââââââââââââââââââââââââââââââââââ
     ws3 = wb.create_sheet("Missing from BOQ")
     ws3.sheet_properties.tabColor = 'E65100'
 
     # Banner
     ws3.merge_cells('A1:H1')
     c = ws3['A1']
-    c.value = 'Items Detected in Drawing — Not in BOQ'
+    c.value = 'Items Detected in Drawing â Not in BOQ'
     c.font = banner_font
     c.fill = navy_fill
     c.alignment = Alignment(horizontal='center', vertical='center')
@@ -1246,8 +1246,8 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
                 m['Equipment'],
                 m['Detection'],
                 f"{qty} nos.",
-                unit_rate if unit_rate > 0 else '—',
-                est_exp if est_exp > 0 else '—',
+                unit_rate if unit_rate > 0 else 'â',
+                est_exp if est_exp > 0 else 'â',
                 'MISSING FROM BOQ',
                 m['Trace ID'],
                 m['Notes'],
@@ -1290,7 +1290,7 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
         c.alignment = Alignment(horizontal='center')
         c.border = thin_border
 
-        # Maths breakdown (missing items only — combined total lives on Exec Summary)
+        # Maths breakdown (missing items only â combined total lives on Exec Summary)
         row += 1
         ws3.cell(row=row, column=3, value='Missing items total only. See Executive Summary for combined exposure.').font = Font(name='Arial', size=9, italic=True, color='888888')
 
@@ -1303,7 +1303,7 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
     disclaimer = (
         'Unit rates are estimated based on typical UAE HVAC market pricing for indicative purposes only. '
         'Actual costs must be confirmed with project-specific quotations. This report highlights potential '
-        'discrepancies for QS review — it does not constitute a formal quantity takeoff or financial advice.'
+        'discrepancies for QS review â it does not constitute a formal quantity takeoff or financial advice.'
     )
     c = ws3.cell(row=row, column=1, value=disclaimer)
     c.font = disclaimer_font
@@ -1320,15 +1320,15 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
     return output.getvalue()
 
 
-# ─── Page Config ──────────────────────────────────────────────────────────────
+# âââ Page Config ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 st.set_page_config(
-    page_title="TraceQ — BOQ Risk Review",
-    page_icon="🔍",
+    page_title="TraceQ â BOQ Risk Review",
+    page_icon="ð",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# ─── Branding & Styles ───────────────────────────────────────────────────────
+# âââ Branding & Styles âââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 st.markdown("""
 <style>
     .main-header {
@@ -1357,11 +1357,11 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ─── Header ───────────────────────────────────────────────────────────────────
-st.markdown('<p class="main-header">🔍 TraceQ</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">BOQ Risk Review Engine — by TechTelligence</p>', unsafe_allow_html=True)
+# âââ Header âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+st.markdown('<p class="main-header">ð TraceQ</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">BOQ Risk Review Engine â by TechTelligence</p>', unsafe_allow_html=True)
 
-# ─── Sidebar — Page Navigation ───────────────────────────────────────────────
+# âââ Sidebar â Page Navigation âââââââââââââââââââââââââââââââââââââââââââââââ
 with st.sidebar:
     st.markdown("### Navigation")
     page = st.radio(
@@ -1372,9 +1372,9 @@ with st.sidebar:
     st.markdown("---")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 # VALIDATOR RESPONSE PAGE
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def parse_validator_xlsx(file_bytes, filename):
     """Parse a validator submission XLSX and return structured data from 3 tabs."""
@@ -1388,7 +1388,7 @@ def parse_validator_xlsx(file_bytes, filename):
         'discoveries': [],
     }
 
-    # ── BOQ Comparison tab ──
+    # ââ BOQ Comparison tab ââ
     boq_tab = None
     for key in ['BOQ COMPARISON', 'BOQ_COMPARISON']:
         if key in sheet_names_upper:
@@ -1405,11 +1405,15 @@ def parse_validator_xlsx(file_bytes, filename):
     if boq_tab:
         # Find header row (look for "Equipment" or "#" in first 5 rows)
         header_row = 2  # default
+        _found_header = False
         for r in range(1, 6):
+            if _found_header:
+                break
             for c in range(1, 10):
                 val = boq_tab.cell(row=r, column=c).value
                 if val and 'EQUIPMENT' in str(val).upper():
                     header_row = r
+                    _found_header = True
                     break
 
         # Read data rows starting after header
@@ -1453,7 +1457,7 @@ def parse_validator_xlsx(file_bytes, filename):
                 'comments': comments,
             })
 
-    # ── Missing from BOQ tab ──
+    # ââ Missing from BOQ tab ââ
     missing_tab = None
     for sn in wb.sheetnames:
         if 'MISSING' in sn.upper():
@@ -1464,11 +1468,15 @@ def parse_validator_xlsx(file_bytes, filename):
 
     if missing_tab:
         header_row = 2
+        _found_header = False
         for r in range(1, 6):
+            if _found_header:
+                break
             for c in range(1, 10):
                 val = missing_tab.cell(row=r, column=c).value
                 if val and 'EQUIPMENT' in str(val).upper():
                     header_row = r
+                    _found_header = True
                     break
 
         for r in range(header_row + 1, missing_tab.max_row + 1):
@@ -1499,7 +1507,7 @@ def parse_validator_xlsx(file_bytes, filename):
                 'comments': comments,
             })
 
-    # ── Validator Discoveries tab ──
+    # ââ Validator Discoveries tab ââ
     disc_tab = None
     for sn in wb.sheetnames:
         if 'DISCOVER' in sn.upper():
@@ -1510,11 +1518,15 @@ def parse_validator_xlsx(file_bytes, filename):
 
     if disc_tab:
         header_row = 3  # Discoveries typically has instructions in rows 1-2
+        _found_header = False
         for r in range(1, 6):
+            if _found_header:
+                break
             for c in range(1, 8):
                 val = disc_tab.cell(row=r, column=c).value
                 if val and 'EQUIPMENT' in str(val).upper():
                     header_row = r
+                    _found_header = True
                     break
 
         for r in range(header_row + 1, disc_tab.max_row + 1):
@@ -1548,7 +1560,7 @@ def compare_validators(v1, v2):
     divergences = []
     engine_errors = []
 
-    # ── Compare BOQ Comparison verdicts ──
+    # ââ Compare BOQ Comparison verdicts ââ
     # Build lookup by equipment name (normalised)
     v1_boq = {item['equipment'].upper(): item for item in v1['boq_comparison']}
     v2_boq = {item['equipment'].upper(): item for item in v2['boq_comparison']}
@@ -1600,7 +1612,7 @@ def compare_validators(v1, v2):
         else:
             divergences.append(row)
 
-    # ── Compare Missing from BOQ verdicts ──
+    # ââ Compare Missing from BOQ verdicts ââ
     v1_miss = {item['equipment'].upper(): item for item in v1['missing_from_boq']}
     v2_miss = {item['equipment'].upper(): item for item in v2['missing_from_boq']}
 
@@ -1646,7 +1658,7 @@ def compare_validators(v1, v2):
         else:
             divergences.append(row)
 
-    # ── Collect discoveries from both ──
+    # ââ Collect discoveries from both ââ
     all_discoveries = []
     for d in v1.get('discoveries', []):
         d['source_validator'] = v1['filename']
@@ -1671,7 +1683,7 @@ def write_to_l1_tracker(tracker_bytes, job_id, validator_data_list, comparison=N
     """
     wb = openpyxl.load_workbook(io.BytesIO(tracker_bytes))
 
-    # ── QS Feedback tab ──
+    # ââ QS Feedback tab ââ
     qs_tab = None
     for sn in wb.sheetnames:
         if 'QS' in sn.upper() and 'FEEDBACK' in sn.upper():
@@ -1698,7 +1710,7 @@ def write_to_l1_tracker(tracker_bytes, job_id, validator_data_list, comparison=N
                 qs_tab.cell(row=next_row, column=6, value=item.get('agree', ''))  # Engine Status mapped to QS Agrees?
                 qs_tab.cell(row=next_row, column=7, value=item.get('agree', ''))  # QS Agrees?
                 qs_tab.cell(row=next_row, column=9, value=item.get('comments', ''))  # QS Reasoning
-                # Is This a False Positive? — YES if validator says NO
+                # Is This a False Positive? â YES if validator says NO
                 is_fp = 'YES' if item.get('agree', '').upper() == 'NO' else 'NO'
                 qs_tab.cell(row=next_row, column=10, value=is_fp)
                 qs_tab.cell(row=next_row, column=14, value=validator_name)  # Loop 2 Note (validator ID)
@@ -1720,7 +1732,7 @@ def write_to_l1_tracker(tracker_bytes, job_id, validator_data_list, comparison=N
                 next_row += 1
                 item_no += 1
 
-    # ── Engine Improvement Log tab ──
+    # ââ Engine Improvement Log tab ââ
     eng_tab = None
     for sn in wb.sheetnames:
         if 'ENGINE' in sn.upper() and 'IMPROVEMENT' in sn.upper():
@@ -1770,7 +1782,7 @@ def parse_engine_report(file_bytes):
         'missing_from_boq': [],
     }
 
-    # ── Parse Executive Summary for metadata ──
+    # ââ Parse Executive Summary for metadata ââ
     ws1 = wb.worksheets[0] if wb.worksheets else None
     if ws1:
         for r in range(4, 10):
@@ -1781,7 +1793,7 @@ def parse_engine_report(file_bytes):
             elif 'BOQ' in label:
                 result['boq_name'] = val
 
-    # ── Parse BOQ Comparison tab ──
+    # ââ Parse BOQ Comparison tab ââ
     ws2 = None
     for sn in wb.sheetnames:
         if 'BOQ' in sn.upper() and 'COMPARISON' in sn.upper():
@@ -1830,7 +1842,7 @@ def parse_engine_report(file_bytes):
             except (ValueError, TypeError):
                 drawing_qty = 0
             try:
-                exposure_num = float(exposure) if exposure not in (None, '', '—') else 0
+                exposure_num = float(exposure) if exposure not in (None, '', 'â') else 0
             except (ValueError, TypeError):
                 exposure_num = 0
 
@@ -1851,14 +1863,14 @@ def parse_engine_report(file_bytes):
                 'Risk': status,
                 'Trace ID': trace_id,
                 'Notes': notes,
-                'Exposure (AED)': f'AED {exposure_num:,.0f}' if exposure_num > 0 else '—',
+                'Exposure (AED)': f'AED {exposure_num:,.0f}' if exposure_num > 0 else 'â',
                 '_exposure_num': exposure_num,
                 '_boq_qty': boq_qty,
                 '_unit_rate': unit_rate,
                 '_equipment_type': etype or '',
             })
 
-    # ── Parse Missing from BOQ tab ──
+    # ââ Parse Missing from BOQ tab ââ
     ws3 = None
     for sn in wb.sheetnames:
         if 'MISSING' in sn.upper():
@@ -1901,11 +1913,11 @@ def parse_engine_report(file_bytes):
             qty = float(qty_match.group(1).replace(',', '')) if qty_match else 0
 
             try:
-                unit_rate_num = float(unit_rate) if unit_rate not in (None, '', '—') else 0
+                unit_rate_num = float(unit_rate) if unit_rate not in (None, '', 'â') else 0
             except (ValueError, TypeError):
                 unit_rate_num = 0
             try:
-                est_exp_num = float(est_exp) if est_exp not in (None, '', '—') else 0
+                est_exp_num = float(est_exp) if est_exp not in (None, '', 'â') else 0
             except (ValueError, TypeError):
                 est_exp_num = 0
 
@@ -2000,14 +2012,14 @@ def merge_validated_data(engine_data, validator_data_list, comparison_result=Non
 
     is_dual = len(validator_data_list) == 2 and comparison_result is not None
 
-    # ── Build validator verdict lookups ──
+    # ââ Build validator verdict lookups ââ
     if is_dual:
         # Use comparison_result for verdicts
         boq_agreements = {item['equipment'].upper(): item for item in comparison_result.get('agreements', [])}
         boq_divergences = {item['equipment'].upper(): item for item in comparison_result.get('divergences', [])}
         boq_engine_errors = {item['equipment'].upper(): item for item in comparison_result.get('engine_errors', [])}
 
-        # Missing from BOQ — separate from BOQ comparison
+        # Missing from BOQ â separate from BOQ comparison
         miss_agreements = {}
         miss_divergences = {}
         miss_engine_errors = {}
@@ -2021,12 +2033,12 @@ def merge_validated_data(engine_data, validator_data_list, comparison_result=Non
             if 'false positive' in item.get('issue', '').lower():
                 miss_engine_errors[item['equipment'].upper()] = item
     else:
-        # Single validator — use raw parsed data
+        # Single validator â use raw parsed data
         v1 = validator_data_list[0]
         v1_boq = {item['equipment'].upper(): item for item in v1['boq_comparison']}
         v1_miss = {item['equipment'].upper(): item for item in v1['missing_from_boq']}
 
-    # ── Process BOQ Comparison items ──
+    # ââ Process BOQ Comparison items ââ
     for comp in engine_data['comparisons']:
         equip_upper = comp['Equipment'].upper()
 
@@ -2039,7 +2051,7 @@ def merge_validated_data(engine_data, validator_data_list, comparison_result=Non
             # Check divergences (conservative include)
             if equip_upper in boq_divergences:
                 div = boq_divergences[equip_upper]
-                comp['Notes'] = (comp['Notes'] + ' | Validator disagreement — included for review.').strip(' | ')
+                comp['Notes'] = (comp['Notes'] + ' | Validator disagreement â included for review.').strip(' | ')
                 comp['_confidence'] = 'Conservative Include'
                 metadata['conservative_includes'] += 1
                 merged_comparisons.append(comp)
@@ -2048,7 +2060,7 @@ def merge_validated_data(engine_data, validator_data_list, comparison_result=Non
             # Check agreements
             if equip_upper in boq_agreements:
                 agr = boq_agreements[equip_upper]
-                # Both said YES — confirmed
+                # Both said YES â confirmed
                 if agr.get('v1_agree') == 'YES' and agr.get('v2_agree') == 'YES':
                     comp['_confidence'] = 'Validator Confirmed'
                 # Both said NO (already caught as engine error above, but safety)
@@ -2066,7 +2078,7 @@ def merge_validated_data(engine_data, validator_data_list, comparison_result=Non
                         if comp['_boq_qty'] > 0:
                             comp['Variance %'] = f"{abs(comp['Difference']) / comp['_boq_qty'] * 100:.0f}%"
                         comp['_exposure_num'] = abs(comp['Difference']) * comp.get('_unit_rate', 0)
-                        comp['Notes'] = (comp['Notes'] + f' | Validator corrected: {int(old_qty)} → {int(corrected)}').strip(' | ')
+                        comp['Notes'] = (comp['Notes'] + f' | Validator corrected: {int(old_qty)} â {int(corrected)}').strip(' | ')
                         comp['_confidence'] = 'Validator Corrected'
                         metadata['validator_corrections'] += 1
                     else:
@@ -2076,7 +2088,7 @@ def merge_validated_data(engine_data, validator_data_list, comparison_result=Non
                 merged_comparisons.append(comp)
                 continue
 
-            # No validator match found — include as-is
+            # No validator match found â include as-is
             comp['_confidence'] = 'Engine Only'
             merged_comparisons.append(comp)
 
@@ -2108,12 +2120,12 @@ def merge_validated_data(engine_data, validator_data_list, comparison_result=Non
                     if comp['_boq_qty'] > 0:
                         comp['Variance %'] = f"{abs(comp['Difference']) / comp['_boq_qty'] * 100:.0f}%"
                     comp['_exposure_num'] = abs(comp['Difference']) * comp.get('_unit_rate', 0)
-                    comp['Notes'] = (comp['Notes'] + f' | Validator corrected: {int(old_qty)} → {int(corrected)}').strip(' | ')
+                    comp['Notes'] = (comp['Notes'] + f' | Validator corrected: {int(old_qty)} â {int(corrected)}').strip(' | ')
                     comp['_confidence'] = 'Validator Corrected'
                     metadata['validator_corrections'] += 1
                     merged_comparisons.append(comp)
                 else:
-                    # Exclude — engine error
+                    # Exclude â engine error
                     metadata['engine_errors_excluded'] += 1
                 continue
             elif verdict == 'YES':
@@ -2122,13 +2134,13 @@ def merge_validated_data(engine_data, validator_data_list, comparison_result=Non
                     comp['Notes'] = (comp['Notes'] + f' | Validator: {comments[:100]}').strip(' | ')
                 merged_comparisons.append(comp)
             else:
-                # PARTIAL or other — include with note
+                # PARTIAL or other â include with note
                 comp['_confidence'] = 'Validator Confirmed'
                 if comments:
                     comp['Notes'] = (comp['Notes'] + f' | Validator: {comments[:100]}').strip(' | ')
                 merged_comparisons.append(comp)
 
-    # ── Process Missing from BOQ items ──
+    # ââ Process Missing from BOQ items ââ
     for m in engine_data['missing_from_boq']:
         equip_upper = m['Equipment'].upper()
 
@@ -2138,7 +2150,7 @@ def merge_validated_data(engine_data, validator_data_list, comparison_result=Non
                 continue
 
             if equip_upper in miss_divergences:
-                m['Notes'] = (m['Notes'] + ' | Validator disagreement — included for review.').strip(' | ')
+                m['Notes'] = (m['Notes'] + ' | Validator disagreement â included for review.').strip(' | ')
                 metadata['conservative_includes'] += 1
                 merged_missing.append(m)
                 continue
@@ -2151,7 +2163,7 @@ def merge_validated_data(engine_data, validator_data_list, comparison_result=Non
                 merged_missing.append(m)
                 continue
 
-            # No verdict found — include as-is
+            # No verdict found â include as-is
             merged_missing.append(m)
         else:
             v_item = v1_miss.get(equip_upper)
@@ -2174,7 +2186,7 @@ def merge_validated_data(engine_data, validator_data_list, comparison_result=Non
                     m['Notes'] = (m['Notes'] + f' | Validator: {v_item["comments"][:100]}').strip(' | ')
                 merged_missing.append(m)
 
-    # ── Fold discoveries into Missing from BOQ ──
+    # ââ Fold discoveries into Missing from BOQ ââ
     discoveries = []
     if is_dual and comparison_result:
         discoveries = comparison_result.get('discoveries', [])
@@ -2261,7 +2273,7 @@ def render_client_report_page():
         job_id_cr = st.text_input("Job ID", value="TQ-JOB-001", help="Job identifier for the report.", key="job_id_cr")
         client_name = st.text_input("Client Name (optional)", value="", help="Client name for report header.", key="client_name_cr")
 
-    # ── Main content ──
+    # ââ Main content ââ
     st.markdown("---")
 
     # Guide
@@ -2290,7 +2302,7 @@ def render_client_report_page():
         st.warning("Maximum 2 validator files. Only the first 2 will be used.")
         validator_files_cr = validator_files_cr[:2]
 
-    # ── Parse engine report ──
+    # ââ Parse engine report ââ
     with st.spinner("Parsing engine report..."):
         engine_bytes = engine_report_file.read()
         engine_data = parse_engine_report(engine_bytes)
@@ -2299,7 +2311,7 @@ def render_client_report_page():
         st.error("Could not parse the engine report. Please ensure this is a TraceQ BOQ Report XLSX from the Engine Analysis page.")
         return
 
-    # ── Parse validator submissions ──
+    # ââ Parse validator submissions ââ
     parsed_validators = []
     for vf in validator_files_cr:
         with st.spinner(f"Parsing {vf.name}..."):
@@ -2307,18 +2319,18 @@ def render_client_report_page():
             parsed = parse_validator_xlsx(vbytes, vf.name)
             parsed_validators.append(parsed)
 
-    # ── Run comparison if dual ──
+    # ââ Run comparison if dual ââ
     comparison_result = None
     if len(parsed_validators) == 2:
         comparison_result = compare_validators(parsed_validators[0], parsed_validators[1])
 
-    # ── Merge ──
+    # ââ Merge ââ
     with st.spinner("Merging validated data..."):
         merged_comparisons, merged_missing, metadata = merge_validated_data(
             engine_data, parsed_validators, comparison_result
         )
 
-    # ── Preview stats ──
+    # ââ Preview stats ââ
     st.markdown("### Merge preview")
 
     c1, c2, c3, c4 = st.columns(4)
@@ -2330,9 +2342,9 @@ def render_client_report_page():
     if metadata['conservative_includes'] > 0:
         st.caption(f"Conservative includes (validator disagreement): {metadata['conservative_includes']}")
 
-    st.caption(f"Validation: {metadata['validation_method']} — {', '.join(metadata['validator_names'])}")
+    st.caption(f"Validation: {metadata['validation_method']} â {', '.join(metadata['validator_names'])}")
 
-    # ── Expandable previews ──
+    # ââ Expandable previews ââ
     with st.expander(f"BOQ comparison items ({len(merged_comparisons)} items)", expanded=False):
         if merged_comparisons:
             import pandas as pd
@@ -2358,10 +2370,10 @@ def render_client_report_page():
 
     excluded_count = metadata['engine_errors_excluded']
     if excluded_count > 0:
-        with st.expander(f"Excluded items — engine errors ({excluded_count})", expanded=False):
+        with st.expander(f"Excluded items â engine errors ({excluded_count})", expanded=False):
             st.markdown("These items were removed because validator(s) confirmed the engine count was incorrect.")
 
-    # ── Generate button ──
+    # ââ Generate button ââ
     st.markdown("---")
     if st.button("Generate Client Report", type="primary"):
         with st.spinner("Generating polished client report..."):
@@ -2433,7 +2445,7 @@ def render_validator_page():
         st.error("Please upload a maximum of 2 validator files.")
         return
 
-    # ── Parse uploads ──
+    # ââ Parse uploads ââ
     parsed = []
     for vf in validator_files:
         with st.spinner(f"Parsing {vf.name}..."):
@@ -2449,7 +2461,7 @@ def render_validator_page():
 
     st.markdown("---")
 
-    # ── Single validator view ──
+    # ââ Single validator view ââ
     if len(parsed) == 1:
         v = parsed[0]
         st.markdown("### Validator Submission Summary")
@@ -2505,7 +2517,7 @@ def render_validator_page():
                 use_container_width=True, hide_index=True,
             )
 
-    # ── Dual validator comparison ──
+    # ââ Dual validator comparison ââ
     else:
         st.markdown("### Dual Validator Comparison")
         st.markdown(f"**Validator 1:** {parsed[0]['filename']}  |  **Validator 2:** {parsed[1]['filename']}")
@@ -2580,7 +2592,7 @@ def render_validator_page():
                 use_container_width=True, hide_index=True,
             )
 
-    # ── L1 Tracker population ──
+    # ââ L1 Tracker population ââ
     st.markdown("---")
     st.markdown("### L1 Feedback Tracker")
 
@@ -2617,9 +2629,9 @@ def render_validator_page():
                     st.error(f"Error writing to tracker: {str(e)}")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 # PAGE ROUTER
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 if page == "Upload Validator Response":
     render_validator_page()
@@ -2628,20 +2640,20 @@ elif page == "Generate Client Report":
     render_client_report_page()
 
 else:
-    # ─── ENGINE ANALYSIS PAGE (original) ─────────────────────────────────────
+    # âââ ENGINE ANALYSIS PAGE (original) âââââââââââââââââââââââââââââââââââââ
     with st.sidebar:
         st.markdown("### Upload Files")
         st.markdown("Upload your HVAC drawing(s) to analyse.")
 
     drawing_files = st.file_uploader(
-        "📐 Drawing File(s) (DXF or DWG)",
+        "ð Drawing File(s) (DXF or DWG)",
         type=["dxf", "dwg"],
         accept_multiple_files=True,
         help="Upload one or more HVAC layout drawings in DXF or DWG format."
     )
 
     boq_file = st.file_uploader(
-        "📊 BOQ Spreadsheet (optional)",
+        "ð BOQ Spreadsheet (optional)",
         type=["xlsx", "xls", "csv"],
         help="Upload the Bill of Quantities for comparison. If not provided, TraceQ will still count all equipment found in the drawing."
     )
@@ -2661,41 +2673,41 @@ else:
     st.markdown("---")
     st.markdown("### DWG Support")
     st.markdown(
-        "✅ **DWG files are supported.** Upload a DWG directly and "
+        "â **DWG files are supported.** Upload a DWG directly and "
         "TraceQ will convert it to DXF automatically on the server."
     )
     st.markdown(
         "_If auto-conversion fails, you can also convert manually:_\n"
-        "- **AutoCAD/BricsCAD**: File → Save As → DXF\n"
+        "- **AutoCAD/BricsCAD**: File â Save As â DXF\n"
         "- **Online**: [CloudConvert](https://cloudconvert.com/dwg-to-dxf)"
     )
     st.markdown("---")
     st.markdown("*Built by [TechTelligence](mailto:nicholas@ttelligence.com)*")
-    st.markdown("*v1.3 — March 2026*")
+    st.markdown("*v1.3 â March 2026*")
 
 
-    # ─── Main Content ─────────────────────────────────────────────────────────────
+    # âââ Main Content âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
     if not drawing_files:
-        # Landing state — no file uploaded yet
+        # Landing state â no file uploaded yet
         st.markdown("---")
 
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.markdown("#### 📐 Upload Drawing(s)")
+            st.markdown("#### ð Upload Drawing(s)")
             st.markdown("Upload your HVAC layout drawing(s) (DXF or DWG) using the sidebar.")
         with col2:
-            st.markdown("#### 🔍 Automatic Analysis")
+            st.markdown("#### ð Automatic Analysis")
             st.markdown("TraceQ scans every layer, block, and text label to count equipment.")
         with col3:
-            st.markdown("#### 📊 Get Your Report")
+            st.markdown("#### ð Get Your Report")
             st.markdown("See discrepancies, missing items, and cost exposure at a glance.")
 
         st.markdown("---")
-        st.info("👈 Upload one or more DXF/DWG files in the sidebar to get started.")
+        st.info("ð Upload one or more DXF/DWG files in the sidebar to get started.")
 
     else:
-        # ─── Prepare all uploaded drawing files ───────────────────────────────────
+        # âââ Prepare all uploaded drawing files âââââââââââââââââââââââââââââââââââ
         tmp_paths = []  # List of (filename, tmp_path) tuples
         for drawing_file in drawing_files:
             file_ext = os.path.splitext(drawing_file.name)[1].lower() or '.dxf'
@@ -2703,17 +2715,17 @@ else:
                 tmp.write(drawing_file.read())
                 tmp_path = tmp.name
 
-            # DWG → DXF Auto-Conversion
+            # DWG â DXF Auto-Conversion
             if file_ext == '.dwg':
                 with st.spinner(f"Converting {drawing_file.name} DWG to DXF..."):
                     try:
                         dxf_path = FileConverter.convert_dwg_to_dxf(tmp_path)
                         tmp_path = dxf_path
-                        st.success(f"✅ Converted **{drawing_file.name}** to DXF successfully.")
+                        st.success(f"â Converted **{drawing_file.name}** to DXF successfully.")
                     except RuntimeError as e:
                         st.error(
-                            f"⚠️ Could not convert {drawing_file.name} automatically.\n\n"
-                            f"**What to do:** Open the DWG in AutoCAD or BricsCAD → File → Save As → DXF, "
+                            f"â ï¸ Could not convert {drawing_file.name} automatically.\n\n"
+                            f"**What to do:** Open the DWG in AutoCAD or BricsCAD â File â Save As â DXF, "
                             f"then upload the DXF version.\n\n"
                             f"_Technical detail: {str(e)}_"
                         )
@@ -2725,13 +2737,13 @@ else:
             st.error("No valid drawing files to process.")
             st.stop()
 
-        # ─── Display file count ───────────────────────────────────────────────────
+        # âââ Display file count âââââââââââââââââââââââââââââââââââââââââââââââââââ
         drawing_names = [name for name, _ in tmp_paths]
         drawing_name_combined = " + ".join(drawing_names)
         if len(tmp_paths) > 1:
-            st.info(f"📂 **{len(tmp_paths)} drawing files** uploaded for combined analysis.")
+            st.info(f"ð **{len(tmp_paths)} drawing files** uploaded for combined analysis.")
 
-        # ─── Run Quick Scan (shared between tabs) ──────────────────────────────────
+        # âââ Run Quick Scan (shared between tabs) ââââââââââââââââââââââââââââââââââ
         # Quick Scan tab shows first file. For multi-file feedback sheet, merge all scans.
         scan = None
         scan_for_feedback = None
@@ -2764,32 +2776,32 @@ else:
             except Exception as e:
                 st.error(f"Quick scan failed: {str(e)}")
 
-        # ─── Step 0: Quick Scan + Full Analysis Tabs ──────────────────────────────
+        # âââ Step 0: Quick Scan + Full Analysis Tabs ââââââââââââââââââââââââââââââ
         tab_scan, tab_analysis = st.tabs(["Step 0: Quick Scan", "Full Analysis"])
 
-        # ═══ TAB 1: QUICK SCAN ═══════════════════════════════════════════════════
+        # âââ TAB 1: QUICK SCAN âââââââââââââââââââââââââââââââââââââââââââââââââââ
         with tab_scan:
-            st.markdown("### Step 0 — Compatibility Scan")
+            st.markdown("### Step 0 â Compatibility Scan")
             st.caption("Quick check: how much of this drawing does TraceQ recognise?")
 
             if scan and scan._dwg_unsupported:
                 st.error(scan.verdict_msg)
             elif scan:
-                # ── Overall Score ──
+                # ââ Overall Score ââ
                 if scan.verdict == 'HIGH':
-                    score_color = "🟢"
-                    st.success(f"{score_color} **Overall Compatibility: {scan.overall_score}% — HIGH**")
+                    score_color = "ð¢"
+                    st.success(f"{score_color} **Overall Compatibility: {scan.overall_score}% â HIGH**")
                     st.info(scan.verdict_msg)
                 elif scan.verdict == 'MEDIUM':
-                    score_color = "🟡"
-                    st.warning(f"{score_color} **Overall Compatibility: {scan.overall_score}% — MEDIUM**")
+                    score_color = "ð¡"
+                    st.warning(f"{score_color} **Overall Compatibility: {scan.overall_score}% â MEDIUM**")
                     st.info(scan.verdict_msg)
                 else:
-                    score_color = "🔴"
-                    st.error(f"{score_color} **Overall Compatibility: {scan.overall_score}% — LOW**")
+                    score_color = "ð´"
+                    st.error(f"{score_color} **Overall Compatibility: {scan.overall_score}% â LOW**")
                     st.info(scan.verdict_msg)
 
-                # ── Score Breakdown ──
+                # ââ Score Breakdown ââ
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     st.metric("Layers", f"{scan.layer_score}%",
@@ -2805,9 +2817,9 @@ else:
 
                 st.markdown("---")
 
-                # ── Recognised Layers ──
+                # ââ Recognised Layers ââ
                 if scan.recognised_layers:
-                    with st.expander(f"✅ Recognised Layers ({len(scan.recognised_layers)})", expanded=True):
+                    with st.expander(f"â Recognised Layers ({len(scan.recognised_layers)})", expanded=True):
                         layer_data = []
                         for rl in scan.recognised_layers:
                             layer_data.append({
@@ -2818,16 +2830,16 @@ else:
                             })
                         st.dataframe(layer_data, use_container_width=True, hide_index=True)
 
-                # ── Unrecognised Layers ──
+                # ââ Unrecognised Layers ââ
                 if scan.unrecognised_layers:
-                    with st.expander(f"❓ Unrecognised Layers ({len(scan.unrecognised_layers)})", expanded=False):
+                    with st.expander(f"â Unrecognised Layers ({len(scan.unrecognised_layers)})", expanded=False):
                         st.caption("These layers may contain equipment that TraceQ doesn't recognise yet. Nestor can help identify them.")
                         for ul in scan.unrecognised_layers:
                             st.text(f"  {ul}")
 
-                # ── Recognised Blocks ──
+                # ââ Recognised Blocks ââ
                 if scan.recognised_blocks:
-                    with st.expander(f"✅ Recognised Blocks ({len(scan.recognised_blocks)})", expanded=True):
+                    with st.expander(f"â Recognised Blocks ({len(scan.recognised_blocks)})", expanded=True):
                         block_data = []
                         for rb in scan.recognised_blocks:
                             block_data.append({
@@ -2838,9 +2850,9 @@ else:
                             })
                         st.dataframe(block_data, use_container_width=True, hide_index=True)
 
-                # ── Unrecognised Blocks ──
+                # ââ Unrecognised Blocks ââ
                 if scan.unrecognised_blocks:
-                    with st.expander(f"❓ Unrecognised Blocks ({len(scan.unrecognised_blocks)})", expanded=False):
+                    with st.expander(f"â Unrecognised Blocks ({len(scan.unrecognised_blocks)})", expanded=False):
                         st.caption("These blocks may be equipment. Nestor can identify them to expand the dictionary.")
                         block_unk = []
                         for ub in scan.unrecognised_blocks:
@@ -2853,9 +2865,9 @@ else:
                 st.markdown("---")
                 st.caption("Tip: After running the full analysis, send unrecognised items to Nestor for identification. His corrections will permanently improve TraceQ's accuracy.")
 
-        # ═══ TAB 2: FULL ANALYSIS ════════════════════════════════════════════════
+        # âââ TAB 2: FULL ANALYSIS ââââââââââââââââââââââââââââââââââââââââââââââââ
         with tab_analysis:
-            # ─── Analyse all drawing files with multi-view dedup ─────────────────────
+            # âââ Analyse all drawing files with multi-view dedup âââââââââââââââââââââ
             all_results = []
             combined_merged = {}
             combined_parse_info = {'layers': 0, 'block_types': 0}
@@ -2895,11 +2907,11 @@ else:
                 st.error("No drawing files could be analysed.")
                 st.stop()
 
-            # ─── Results Header ───────────────────────────────────────────────────────
+            # âââ Results Header âââââââââââââââââââââââââââââââââââââââââââââââââââââââ
             if len(all_results) == 1:
-                st.success(f"✅ Analysis complete — **{all_results[0][0]}**")
+                st.success(f"â Analysis complete â **{all_results[0][0]}**")
             else:
-                msg = f"✅ Analysis complete — **{len(all_results)} files** combined"
+                msg = f"â Analysis complete â **{len(all_results)} files** combined"
                 if skipped_files:
                     msg += f" ({len(skipped_files)} non-layout files filtered)"
                 has_multi_view = any(len(g) > 1 for g in floor_groups)
@@ -2908,7 +2920,7 @@ else:
                 st.success(msg)
             st.markdown("---")
 
-            # ─── Key Metrics ──────────────────────────────────────────────────────────
+            # âââ Key Metrics ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
             merged = combined_merged
             total_items = sum(v.get('count', 0) for v in merged.values())
             total_categories = len(merged)
@@ -2927,8 +2939,8 @@ else:
 
             st.markdown("---")
 
-            # ─── Equipment Inventory ──────────────────────────────────────────────────
-            st.markdown("### 📋 Equipment Inventory")
+            # âââ Equipment Inventory ââââââââââââââââââââââââââââââââââââââââââââââââââ
+            st.markdown("### ð Equipment Inventory")
 
             table_data = []
             review_items = []
@@ -2940,13 +2952,13 @@ else:
                 flagged = data.get('needs_review', False)
 
                 if 'tier1' in source:
-                    source_label = "🟢 Layer"
+                    source_label = "ð¢ Layer"
                 elif 'tier2' in source:
-                    source_label = "🔵 Block"
+                    source_label = "ðµ Block"
                 elif 'tier3' in source:
-                    source_label = "🟡 Text"
+                    source_label = "ð¡ Text"
                 else:
-                    source_label = f"⚪ {source}"
+                    source_label = f"âª {source}"
 
                 name = _format_equipment_name(equip_type)
 
@@ -2960,20 +2972,20 @@ else:
                     "Count": count,
                     "Source": source_label,
                     "Confidence": f"{int(confidence * 100)}%",
-                    "Layer": t1 if t1 > 0 else "—",
-                    "Block": t2 if t2 > 0 else "—",
-                    "Text": t3 if t3 > 0 else "—",
+                    "Layer": t1 if t1 > 0 else "â",
+                    "Block": t2 if t2 > 0 else "â",
+                    "Text": t3 if t3 > 0 else "â",
                 }
 
                 if flagged:
-                    row["Flag"] = "⚠️ Review"
+                    row["Flag"] = "â ï¸ Review"
                     review_items.append({
                         'name': name,
                         'note': data.get('notes', 'Tier counts disagree significantly.'),
                         'tier1': t1, 'tier2': t2, 'tier3': t3,
                     })
                 else:
-                    row["Flag"] = "✅"
+                    row["Flag"] = "â"
 
                 table_data.append(row)
 
@@ -2996,10 +3008,10 @@ else:
 
             # Show review warnings if any
             if review_items:
-                st.markdown("#### ⚠️ Items Flagged for QS Review")
+                st.markdown("#### â ï¸ Items Flagged for QS Review")
                 for item in review_items:
                     st.warning(
-                        f"**{item['name']}** — Tier counts disagree: "
+                        f"**{item['name']}** â Tier counts disagree: "
                         f"Layer={item['tier1']}, Block={item['tier2']}, Text={item['tier3']}. "
                         f"Recommend manual verification."
                     )
@@ -3009,14 +3021,14 @@ else:
             if dedup_report:
                 adjustments = dedup_report.get('adjustments', [])
                 if adjustments:
-                    with st.expander(f"🔗 Proximity Deduplication ({len(adjustments)} adjustments)", expanded=False):
+                    with st.expander(f"ð Proximity Deduplication ({len(adjustments)} adjustments)", expanded=False):
                         st.caption(
-                            "Text labels found near block INSERTs of the same equipment type — "
+                            "Text labels found near block INSERTs of the same equipment type â "
                             "Tier 3 count reduced to avoid double-counting."
                         )
                         for adj in adjustments:
                             st.info(
-                                f"**{_format_equipment_name(adj.get('equipment_type', ''))}** — "
+                                f"**{_format_equipment_name(adj.get('equipment_type', ''))}** â "
                                 f"Tier 3 reduced from {adj.get('tier3_original', 0)} to {adj.get('tier3_adjusted', 0)} "
                                 f"({adj.get('shadowed_by_blocks', 0)} text labels near blocks, "
                                 f"radius: {dedup_report.get('radius_used', 0):.0f} units)"
@@ -3024,21 +3036,21 @@ else:
 
             st.markdown("---")
 
-            # ─── BOQ Comparison (if BOQ uploaded) ─────────────────────────────────────
+            # âââ BOQ Comparison (if BOQ uploaded) âââââââââââââââââââââââââââââââââââââ
             if boq_file is not None:
-                st.markdown("### 📊 BOQ Discrepancy Report")
+                st.markdown("### ð BOQ Discrepancy Report")
 
                 try:
                     boq_bytes = boq_file.read()
                     boq_items = parse_boq(boq_bytes, boq_file.name)
 
                     if boq_items:
-                        # ── BOQ Coverage Check (Tier 1 pre-flight) ──
+                        # ââ BOQ Coverage Check (Tier 1 pre-flight) ââ
                         classified, unclassified = boq_coverage_check(boq_items)
                         coverage_pct = len(classified) / len(boq_items) * 100 if boq_items else 0
 
                         with st.expander(
-                            f"🔍 BOQ Coverage Check — {len(classified)}/{len(boq_items)} items classified ({coverage_pct:.0f}%)",
+                            f"ð BOQ Coverage Check â {len(classified)}/{len(boq_items)} items classified ({coverage_pct:.0f}%)",
                             expanded=len(unclassified) > 0
                         ):
                             if unclassified:
@@ -3075,7 +3087,7 @@ else:
 
                         comparisons, missing_from_boq = compare_boq_vs_drawing(boq_items, merged)
 
-                        # ── Summary Metrics ──
+                        # ââ Summary Metrics ââ
                         matches = sum(1 for c in comparisons if c['Risk'] == 'MATCH')
                         discrepancies = sum(1 for c in comparisons if c['Risk'] == 'DISCREPANCY')
                         missing_count = len(missing_from_boq)
@@ -3093,7 +3105,7 @@ else:
                         with col4:
                             st.metric("Total Exposure", f"AED {total_exposure:,.0f}")
 
-                        # ── EXCEL DOWNLOAD — top of report ──
+                        # ââ EXCEL DOWNLOAD â top of report ââ
                         excel_bytes = generate_excel_report(
                             comparisons, missing_from_boq, boq_items,
                             drawing_name_combined, boq_file.name,
@@ -3105,7 +3117,7 @@ else:
                         col_dl1, col_dl2 = st.columns(2)
                         with col_dl1:
                             st.download_button(
-                                label="📥 Download BOQ Report (Client)",
+                                label="ð¥ Download BOQ Report (Client)",
                                 data=excel_bytes,
                                 file_name=report_filename,
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -3119,7 +3131,7 @@ else:
                             )
                             validator_filename = f"TraceQ_Validator_{_dname}_{datetime.now().strftime('%Y%m%d')}.xlsx"
                             st.download_button(
-                                label="📋 Download Validator Template",
+                                label="ð Download Validator Template",
                                 data=validator_bytes,
                                 file_name=validator_filename,
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -3127,7 +3139,7 @@ else:
 
                         st.markdown("---")
 
-                        # ── Main Comparison Table ──
+                        # ââ Main Comparison Table ââ
                         st.markdown("#### Comparison Details")
 
                         display_comparisons = []
@@ -3161,7 +3173,7 @@ else:
                             }
                         )
 
-                        # ── Missing from BOQ ──
+                        # ââ Missing from BOQ ââ
                         if missing_from_boq:
                             st.markdown(f"#### Items in Drawing Not in BOQ ({missing_count} items)")
                             st.caption("These items were detected in the drawing but have no corresponding BOQ line item.")
@@ -3191,18 +3203,18 @@ else:
                                 }
                             )
 
-                        # ── Parsed BOQ Line Items (detail expander) ──
-                        with st.expander("📄 Parsed BOQ Line Items", expanded=False):
+                        # ââ Parsed BOQ Line Items (detail expander) ââ
+                        with st.expander("ð Parsed BOQ Line Items", expanded=False):
                             boq_display = []
                             for item in boq_items:
                                 boq_display.append({
-                                    "Ref": item.get('boq_ref', '—'),
+                                    "Ref": item.get('boq_ref', 'â'),
                                     "Description": item['description'][:70],
-                                    "Type": (item['equipment_type'] or '—').replace('_', ' ').title(),
-                                    "Unit": item.get('unit', '—'),
+                                    "Type": (item['equipment_type'] or 'â').replace('_', ' ').title(),
+                                    "Unit": item.get('unit', 'â'),
                                     "Qty": int(item['qty']) if item['qty'] == int(item['qty']) else item['qty'],
-                                    "Rate": f"{item['rate']:,.0f}" if item.get('rate') else '—',
-                                    "Total": f"{item['total']:,.0f}" if item.get('total') else '—',
+                                    "Rate": f"{item['rate']:,.0f}" if item.get('rate') else 'â',
+                                    "Total": f"{item['total']:,.0f}" if item.get('total') else 'â',
                                 })
                             st.dataframe(boq_display, use_container_width=True, hide_index=True)
                     else:
@@ -3213,14 +3225,14 @@ else:
 
                 st.markdown("---")
 
-            # ─── Validation Results ───────────────────────────────────────────────────
-            st.markdown("### ⚠️ Validation Checks")
+            # âââ Validation Results âââââââââââââââââââââââââââââââââââââââââââââââââââ
+            st.markdown("### â ï¸ Validation Checks")
 
             validation = result.validation_results
             warnings = validation.get('warnings', [])
 
             if not warnings:
-                st.success("All validation checks passed — no warnings.")
+                st.success("All validation checks passed â no warnings.")
             else:
                 for w in warnings:
                     if isinstance(w, dict):
@@ -3243,8 +3255,8 @@ else:
 
             st.markdown("---")
 
-            # ─── Layer Classification ─────────────────────────────────────────────────
-            with st.expander("🗂️ Layer Classification Details", expanded=False):
+            # âââ Layer Classification âââââââââââââââââââââââââââââââââââââââââââââââââ
+            with st.expander("ðï¸ Layer Classification Details", expanded=False):
                 layer_results = result.layer_classification
                 classified = []
                 unclassified = []
@@ -3272,14 +3284,14 @@ else:
                     st.markdown(f"**Unclassified Layers ({len(unclassified)}):**")
                     st.text(", ".join(unclassified))
 
-            # ─── Detection Tier Breakdown ─────────────────────────────────────────────
-            with st.expander("📊 Detection Tier Breakdown", expanded=False):
+            # âââ Detection Tier Breakdown âââââââââââââââââââââââââââââââââââââââââââââ
+            with st.expander("ð Detection Tier Breakdown", expanded=False):
                 for tier_name in ['tier1', 'tier2', 'tier3']:
                     tier_data = result.detection_results.get(tier_name, {})
                     if tier_data:
-                        labels = {'tier1': '🟢 Tier 1 — Layer Detection',
-                                  'tier2': '🔵 Tier 2 — Block Detection',
-                                  'tier3': '🟡 Tier 3 — Text Detection'}
+                        labels = {'tier1': 'ð¢ Tier 1 â Layer Detection',
+                                  'tier2': 'ðµ Tier 2 â Block Detection',
+                                  'tier3': 'ð¡ Tier 3 â Text Detection'}
                         st.markdown(f"**{labels[tier_name]}**")
                         tier_items = []
                         for equip, data in sorted(tier_data.items()):
@@ -3289,15 +3301,15 @@ else:
                             })
                         st.dataframe(tier_items, use_container_width=True, hide_index=True)
 
-            # ─── Raw JSON Output ──────────────────────────────────────────────────────
-            with st.expander("🔧 Raw JSON Output", expanded=False):
+            # âââ Raw JSON Output ââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+            with st.expander("ð§ Raw JSON Output", expanded=False):
                 st.json(result.to_dict())
 
-            # ─── Download Button (JSON fallback — always available) ───────────────────
+            # âââ Download Button (JSON fallback â always available) âââââââââââââââââââ
             st.markdown("---")
             json_output = json.dumps(result.to_dict(), indent=2)
             st.download_button(
-                label="📥 Download Full Analysis (JSON)",
+                label="ð¥ Download Full Analysis (JSON)",
                 data=json_output,
                 file_name=f"TraceQ_Analysis_{_dname}_{datetime.now().strftime('%Y%m%d')}.json",
                 mime="application/json",
