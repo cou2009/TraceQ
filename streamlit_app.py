@@ -832,7 +832,7 @@ def generate_validator_template(comparisons, missing_from_boq, merged, drawing_n
     return output.getvalue()
 
 
-def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name, boq_name, merged=None, dedup_report=None):
+def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name, boq_name, merged=None, dedup_report=None, validation_metadata=None):
     """
     Generate a professional Excel BOQ Risk Analysis Report per TraceQ_Report_Format_Spec.
     3-tab client report:
@@ -950,6 +950,31 @@ def generate_excel_report(comparisons, missing_from_boq, boq_items, drawing_name
         ws1.cell(row=row, column=1, value=label).font = bold_font
         ws1.cell(row=row, column=2, value=val).font = normal_font
         row += 1
+
+    # ── Validation metadata (if provided) ──
+    if validation_metadata:
+        row += 1
+        c = ws1.cell(row=row, column=1, value='VALIDATION SUMMARY')
+        c.font = Font(name='Arial', bold=True, size=11, color=navy)
+        for ci in range(1, 7):
+            ws1.cell(row=row, column=ci).fill = section_fill
+            ws1.cell(row=row, column=ci).border = thin_border
+        row += 1
+        vm = validation_metadata
+        val_details = [
+            ('Method:', vm.get('validation_method', 'N/A')),
+            ('Validator(s):', ', '.join(vm.get('validator_names', []))),
+            ('Engine Errors Excluded:', str(vm.get('engine_errors_excluded', 0))),
+            ('Validator Corrections:', str(vm.get('validator_corrections', 0))),
+            ('Discoveries Added:', str(vm.get('discoveries_added', 0))),
+        ]
+        if vm.get('conservative_includes', 0) > 0:
+            val_details.append(('Disagreements (conservatively included):', str(vm['conservative_includes'])))
+        for label, val in val_details:
+            ws1.cell(row=row, column=1, value=label).font = bold_font
+            ws1.cell(row=row, column=2, value=val).font = normal_font
+            _apply_border_row(ws1, row, 2)
+            row += 1
 
     # ââ Stats Bar ââ
     row += 1
@@ -2388,6 +2413,7 @@ def render_client_report_page():
                 boq_items=[],  # Not needed for the report output
                 drawing_name=drawing_name,
                 boq_name=boq_name,
+                validation_metadata=metadata,
             )
 
             st.success(f"Client report generated! {len(merged_comparisons)} BOQ items, {len(merged_missing)} missing items.")
